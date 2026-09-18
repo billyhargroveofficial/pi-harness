@@ -1,0 +1,15 @@
+{
+  "maxConcurrent": 4,
+  "maxConcurrentForeground": 4,
+  "defaultMaxTurns": 60,
+  "graceTurns": 3,
+  "scopeModels": true,
+  "strictAgentFiles": true,
+  "workflowsEnabled": true,
+  "schedulingEnabled": false,
+  "showModel": true,
+  "showCost": true,
+  "reportUsage": true,
+  "fleetView": true,
+  "widgetMode": "background"
+}

@@ -1,0 +1,40 @@
+{
+  "packages": [
+    "npm:@fadouse/pi-math@0.2.0",
+    "npm:pi-deepseek-search@1.0.20",
+    "npm:@tintinweb/pi-subagents@0.19.0",
+    "npm:pi-claude-code-ui",
+    "npm:pi-live-throughput"
+  ],
+  "lastChangelogVersion": "0.85.1",
+  "theme": "claude-green",
+  "defaultProvider": "deepseek",
+  "defaultModel": "deepseek-flash",
+  "defaultThinkingLevel": "max",
+  "hideThinkingBlock": true,
+  "terminal": {
+    "showImages": true
+  },
+  "enableInstallTelemetry": false,
+  "enableAnalytics": false,
+  "collapseChangelog": true,
+  "editorPaddingX": 1,
+  "autocompleteMaxVisible": 7,
+  "compaction": {
+    "enabled": true,
+    "reserveTokens": 16384,
+    "keepRecentTokens": 20000
+  },
+  "enabledModels": [
+    "deepseek/deepseek-flash"
+  ],
+  "skills": [
+    "/Users/billy/.agents/skills",
+    "-/Users/billy/.agents/skills/chatgptweb-clean-archieved-chats/SKILL.md",
+    "-/Users/billy/.agents/skills/chatgptweb-clean-library/SKILL.md",
+    "-/Users/billy/.agents/skills/chatgptweb-imagegen/SKILL.md",
+    "-/Users/billy/.agents/skills/codex-reset-guard/SKILL.md"
+  ],
+  "tuiMode": "fullscreen",
+  "quietStartup": false
+}

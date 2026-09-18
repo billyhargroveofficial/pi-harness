@@ -1,0 +1,17 @@
+{
+  "toolBackground": "transparent",
+  "mcpOutputMode": "preview",
+  "previewLines": 1,
+  "expandedPreviewMaxLines": 4000,
+  "extraExpandedPreviewMaxLines": 12000,
+  "groupToolCalls": true,
+  "thinkingMode": "full",
+  "bashCollapsedLines": 2,
+  "bashCommandPreviewLines": 0,
+  "liveToolPreview": false,
+  "liveToolPreviewLines": 2,
+  "diffCollapsedLines": 8,
+  "themeAdaptive": true,
+  "diffTheme": "everforest-dark",
+  "toolBranchColorMode": "theme"
+}

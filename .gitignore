@@ -1,0 +1,10 @@
+# секреты и машинное состояние — не публикуем
+agent/auth.json
+agent/models-store.json
+agent/trust.json
+agent/sessions/
+agent/npm/
+agent/backups/
+agent/bin/
+*.bak-*
+.DS_Store
