@@ -31,6 +31,7 @@
 - **TUI**: fullscreen
 - **компактный вывод тулов**: свёрнутая bash-строка — ровно одна строка, вывод только по `Ctrl+O`
 - **метрики**: TPS / TTFT / avg через `pi-live-throughput`
+- **формулы**: `$$ ... $$` рисуются юникод-текстом силами `pi-claude-code-ui` (картиночный `pi-math` с ним несовместим, снят)
 
 ## Расширения
 
@@ -41,7 +42,6 @@
 | `pi-claude-code-ui` | 1.0.83 | Рендер тулов в стиле Claude Code: группировка вызовов, Shiki-диффы, `Thought for Ns`, спиннер с CC-вербами, MCP-рендер |
 | `@tintinweb/pi-subagents` | 0.19.0 | Субагенты и workflow-оркестрация (`Agent`, `SubagentWorkflow`) |
 | `pi-deepseek-search` | 1.0.20 | Нативный веб-поиск DeepSeek как инструмент |
-| `@fadouse/pi-math` | 0.2.0 | Отрисовка формул (`$$ ... $$`) через pi-math |
 | `pi-live-throughput` | 0.2.0 | TPS / avg TPS / TTFT / peak / input / cache read после каждого ответа |
 
 Конфиг расширений — `ext/settings.json` → `~/.pi/settings.json`. Важный нюанс: расширения семейства `pi-claude-code-ui` читают **не** `~/.pi/agent/settings.json`, а жёстко `$HOME/.pi/settings.json` и `$(pwd)/.pi/settings.json` (HOME-файл перекрывает проектный). Поэтому конфиг расширений живёт отдельным файлом и не смешивается с настройками pi.

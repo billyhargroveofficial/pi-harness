@@ -1,6 +1,5 @@
 {
   "packages": [
-    "npm:@fadouse/pi-math@0.2.0",
     "npm:pi-deepseek-search@1.0.20",
     "npm:@tintinweb/pi-subagents@0.19.0",
     "npm:pi-claude-code-ui",

@@ -46,9 +46,9 @@ timeout 20 script -q /dev/null pi --tui-mode regular --no-session < /dev/null > 
 В шапке ресурсов видно, что именно подхватилось:
 
 ```
-[Extensions]  @fadouse/pi-math@0.2.0:src, @tintinweb/pi-subagents@0.19.0:src,
-              pi-claude-code-ui, pi-claude-code-ui:spinner.ts,
-              pi-deepseek-search@1.0.20, pi-live-throughput:src
+[Extensions]  @tintinweb/pi-subagents@0.19.0:src, pi-claude-code-ui,
+              pi-claude-code-ui:spinner.ts, pi-deepseek-search@1.0.20,
+              pi-live-throughput:src
 [Themes]      billy-aurora, claude-green
 ```
 
