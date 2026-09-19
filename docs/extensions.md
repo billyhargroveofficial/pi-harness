@@ -39,7 +39,6 @@
   "liveToolPreviewLines": 2,
   "diffCollapsedLines": 8,
   "themeAdaptive": true,
-  "diffTheme": "everforest-dark",
   "toolBranchColorMode": "theme"
 }
 ```
@@ -48,7 +47,22 @@
 
 `toolBackground: "transparent"` — без рамок и фонов вокруг тул-строк (вариант автора расширения). `outlines` (дефолт) рисует горизонтальные правила вокруг каждого тула.
 
-`diffTheme: "everforest-dark"` + `toolBranchColorMode: "theme"` — подгонка под зелёную тему `claude-green`.
+`themeAdaptive: true` + `toolBranchColorMode: "theme"` — расширение само выводит цвета границ/бранчей/диффов из активной темы pi. Ключевой нюанс: **это настройка расширения, а не темы pi** (она читается из `$HOME/.pi/settings.json`, см. ниже) — на выбор тёмной/светлой темы pi она не влияет вообще.
+
+`diffTheme` убран намеренно. С ним `syncDiffShikiTheme()` выходит первой же строкой (`if (config.diffTheme) return;`), поэтому Shiki-тема кода в диффах не переключалась на `github-light`, а `autoDeriveBgFromTheme()` не пересчитывал фон под светлую панель. Значение `everforest-dark` при этом даже не входит в `DIFF_PRESETS` (там только `default`/`midnight`/`neon`) — то есть фон диффов оно не задавало, а авто-режим ломало. Без `diffTheme` диффы наследуются от темы: светлая панель → `github-light` + светлые тинты, тёмная → `github-dark`.
+
+### Патчи к пакету
+
+В 1.0.83 два бага бьют по светлым темам, оба закрыты патчем `patches/fix-cc-tools-light-chrome.mjs` (подробности и замеры — [`light-theme.md`](light-theme.md)):
+
+1. `outlineChromeAnsiFromBranch()` всегда осветляет chrome на `+64` — на белом фоне `Thought for Ns` / `Turn took …` / рамки выцветали до ≈ 1.5:1. Патч: на светлой панели цвет тянется к `theme.text`.
+2. `stripBackgroundAnsi()` выбрасывала компоненты truecolor-цвета, попавшие в диапазоны фоновых кодов (`40–49`, `100–107`) — `\x1b[38;2;92;106;114m` превращался в битую `\x1b[38;2;92;114m`, и терминал рисовал текст чужим цветом. Патч: `38`/`48`/`58` съедают свои аргументы.
+
+Патч идемпотентен и применяется `install.sh`; после `pi update` (он переустановит пакет) — запустить заново:
+
+```bash
+node ~/.pi/agent/patches/fix-cc-tools-light-chrome.mjs
+```
 
 Что захардкожено и настройками не меняется: рамка вокруг юзер-сообщения (`roundedUserBorder`), коннекторы `├ └ │` (меняется только цвет), форма строк.
 

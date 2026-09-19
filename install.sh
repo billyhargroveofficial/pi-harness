@@ -44,5 +44,16 @@ grep -o 'npm:[^"]*' "$AGENT_DIR/settings.json" | sed 's/^npm://' | while read -r
 done
 
 echo
+
+# Патчи к установленным пакетам (upstream-баги, см. docs/light-theme.md).
+# Идемпотентны: уже пропатченное повторно не трогают.
+echo "Патчи к пакетам (patches/):"
+for f in "$REPO_DIR"/patches/*.mjs; do
+  [ -e "$f" ] || continue
+  echo "  $(basename "$f")"
+  node "$f" || echo "  ! патч не применился: $(basename "$f")"
+done
+
+echo
 echo "Готово. Ключ DeepSeek не в репе: положи его в ~/.config/deepseek.env как DEEPSEEK_API_KEY=..."
 echo "Затем перезапусти pi (или /reload)."

@@ -4,7 +4,7 @@
 
 Назначение репы: держать харнесс версионируемым и переносимым. Здесь лежат только текстовые конфиги; сами расширения ставятся из npm, секретов в репе нет.
 
-Принцип подбора: **только готовые расширения**. Свой код не пишем — если готового решения нет, задача либо откладывается, либо закрывается настройкой (см. `docs/backlog.md`).
+Принцип подбора: **только готовые расширения**. Свой код не пишем — если готового решения нет, задача либо откладывается, либо закрывается настройкой (см. `docs/backlog.md`); если решение упирается в баг установленного пакета — точечным патчем в `patches/`.
 
 ## Что внутри
 
@@ -17,6 +17,7 @@
 | `agent/agents/*.md` | `~/.pi/agent/agents/` — кастомные типы субагентов |
 | `agent/themes/*.json` | `~/.pi/agent/themes/` — кастомные темы |
 | `ext/settings.json` | `~/.pi/settings.json` — конфиг расширений (см. ниже, почему не `agent/`) |
+| `patches/*.mjs` | идемпотентные патчи к установленным пакетам; правит `node_modules`, применяет `install.sh` |
 | `docs/` | журнал решений, замеры, что проверялось, бэклог |
 
 Установка на новой машине: `./install.sh` (копирует с бэкапом существующих файлов).
@@ -27,7 +28,7 @@
 - **провайдер/модель**: `deepseek/deepseek-flash` (DeepSeek V4.1 Flash, `openai-completions`, контекст 1M, max output 384k)
 - **thinking**: уровень `max` по умолчанию, уровень `medium`/`xhigh` у модели скрыт (`thinkingLevelMap`)
 - **thinking-блоки скрыты**: видно `Thinking…` во время и `Thought for Ns` после, содержимое не рендерится (`hideThinkingBlock: true`)
-- **тема**: `claude-green` — тёплые нейтральные фоны в духе Claude Code + зелёный акцент `#A7C080` вместо рыжего
+- **тема**: авто по системной теме macOS — светлая `claude-green-light` / тёмная `claude-green` (тёплые нейтральные фоны в духе Claude Code, зелёный акцент `#A7C080` вместо рыжего). Детект — `CSI ? 996 n` + подписка на mode 2031, Ghostty это отдаёт
 - **TUI**: fullscreen
 - **компактный вывод тулов**: свёрнутая bash-строка — ровно одна строка, вывод только по `Ctrl+O`
 - **метрики**: TPS / TTFT / avg через `pi-live-throughput`
@@ -49,6 +50,7 @@
 Подробности по каждому решению — в `docs/`:
 
 - [`docs/extensions.md`](docs/extensions.md) — что за расширения, какие у них настройки и что у них мертво
+- [`docs/light-theme.md`](docs/light-theme.md) — авто light/dark, светлая тема и патчи к `pi-claude-code-ui`
 - [`docs/compact-output.md`](docs/compact-output.md) — как сделан компактный вывод и замеры «до/после»
 - [`docs/verification.md`](docs/verification.md) — как это проверялось (без веры на слово)
 - [`docs/backlog.md`](docs/backlog.md) — что ещё хочется доделать, сюда же складываются идеи
@@ -57,6 +59,7 @@
 
 ```bash
 pi update --all                 # pi + пакеты
+for p in ~/.pi/agent/patches/*.mjs; do node "$p"; done   # pi update сносит правки в node_modules
 cp ~/.pi/agent/settings.json    agent/settings.json      # и остальные файлы
 cp ~/.pi/settings.json          ext/settings.json
 git commit -am "sync: <что поменялось>"

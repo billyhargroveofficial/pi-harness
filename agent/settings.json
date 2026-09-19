@@ -6,7 +6,7 @@
     "npm:pi-live-throughput"
   ],
   "lastChangelogVersion": "0.85.1",
-  "theme": "claude-green",
+  "theme": "claude-green-light/claude-green",
   "defaultProvider": "deepseek",
   "defaultModel": "deepseek-flash",
   "defaultThinkingLevel": "max",
