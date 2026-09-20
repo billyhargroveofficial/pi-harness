@@ -28,7 +28,8 @@ Shiki-диффы, группировка вызовов), но без двух �
 ## pi-statusline (0.0.2)
 
 Запускает внешнюю команду статус-строки с CC-совместимым JSON на stdin и печатает её stdout в футере. Конфиг —
-`statusLine` в `agent/settings.json`. Полностью — [`statusline.md`](statusline.md).
+`statusLine` в `agent/settings.json`. Патч `patches/fix-pi-statusline-refresh.mjs` добавляет перерисовку на
+`thinking_level_select` (иначе уровень мышления в строке отставал до конца хода). Полностью — [`statusline.md`](statusline.md).
 
 ## pi-claude-code-ui (1.0.83) — отключён
 

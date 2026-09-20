@@ -36,6 +36,17 @@ for f in "$REPO_DIR"/agent/themes/*.json; do put "$f" "$AGENT_DIR/themes/$(basen
 # Конфиг расширений семейства claude-code-ui живёт по другому пути (читают $HOME/.pi/settings.json).
 put "$REPO_DIR/ext/settings.json" "$EXT_CONFIG"
 
+# Скрипт статус-строки (его же использует Claude Code, см. assets/statusline.README.md)
+SL_DIR="$HOME/.local/share/claude-codex-statusline"
+if [ -f "$REPO_DIR/assets/statusline.py" ]; then
+  mkdir -p "$SL_DIR"
+  backup "$SL_DIR/statusline.py"
+  cp -p "$REPO_DIR/assets/statusline.py" "$SL_DIR/statusline.py"
+  chmod 700 "$SL_DIR/statusline.py"
+  cp -p "$REPO_DIR/assets/statusline.README.md" "$SL_DIR/README.md"
+  echo "  -> $SL_DIR/statusline.py"
+fi
+
 echo
 echo "Расширения (ставятся из npm, в репе только конфиги):"
 grep -o 'npm:[^"]*' "$AGENT_DIR/settings.json" | sed 's/^npm://' | while read -r pkg; do

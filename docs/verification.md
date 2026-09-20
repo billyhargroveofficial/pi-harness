@@ -133,3 +133,45 @@ dark:  #999999 → #c9c9c9   худший контраст за цикл = 5.85:
 Захват pty разбирается по SGR-параметрам: трекаются `fg`, `bg`, атрибут `2` (dim) и полный сброс `0`. `DIM` считается как в терминале — 50 % к фону, иначе контекстные строки диффа выглядят «нормальными», хотя на экране они бледные. Только с этим учётом видно разницу «до/после»: контекст диффа был 1.35:1 (DIM), стал 9.63:1 (без DIM).
 
 Скрипт-анализатор — тот же принцип, что в п. 6, но с полным сбросом: без обработки `\e[0m` цвет предыдущего сегмента (например, цвет вертикальной линейки диффа) ошибочно приписывается следующему тексту и даёт ложные 1.1:1.
+
+## 10. Статус-строка и удаление Codex из pi
+
+**Скрипт статус-строки** проверяется тремя payload'ами напрямую (быстрее и точнее, чем ждать живого ответа):
+
+```bash
+# CC (без флагов) — должно остаться прежним, с квотой
+echo '{"model":{"display_name":"gpt-6-astra"},"workspace":{"current_dir":"/Users/billy"},
+       "context_window":{"context_window_size":272000,"used_percentage":12}}' \
+  | /usr/bin/python3 ~/.local/share/claude-codex-statusline/statusline.py
+
+# pi: свежая сессия (session_file=null) → дефолт из ~/.pi/agent/settings.json
+echo '{"model":{"id":"deepseek-flash","display_name":"DeepSeek V4.1 Flash"},
+       "workspace":{"current_dir":"/Users/billy"},
+       "context_window":{"context_window_size":1000000,"used_percentage":0}}' \
+  | /usr/bin/python3 ~/.local/share/claude-codex-statusline/statusline.py --no-quota
+
+# pi: реальная сессия → уровень из последней записи thinking_level_change
+echo '{...,"pi":{"session_file":"/tmp/copy.jsonl"}}' \
+  | /usr/bin/python3 ~/.local/share/claude-codex-statusline/statusline.py --no-quota
+```
+
+Ожидание: `272k medium … ● 7d …` (CC) / `1M max 0k` (свежая) / `1M off …` (после правки уровня в хвосте сессии).
+
+**Сквозная проверка хоткея.** В pty открывается копия сессии, снимается строка до и после `shift+tab` (`\x1b[Z`):
+
+```
+до  shift+tab: 📁 billy ● DeepSeek V4.1 Flash 1M max 363k
+после shift+tab: 📁 billy ● DeepSeek V4.1 Flash 1M off 363k
+```
+
+Это одновременно доказывает три вещи: `shift+tab` меняет уровень в сессии, скрипт читает его оттуда,
+а патч `fix-pi-statusline-refresh.mjs` заставляет футер перерисоваться сразу.
+
+**Удаление Codex** проверяется тремя независимыми точками, а не одной:
+
+| Что | Как проверено |
+|---|---|
+| модели | `enabledModels` = только `deepseek/deepseek-flash`; после pty-запуска `models-store.json` содержит один провайдер `deepseek` (pi пересобрал кэш каталога) |
+| учётки | в `auth.json` остался только `xai-auth` (был ещё `openai-codex`) |
+| поиск | `~/.pi/agent/extensions/codex-web-search.ts` удалён; при загрузке pi ошибок нет (`error|failed|cannot|invalid` в кадре — пусто) |
+| селектор моделей | в кадре `ctrl+l` нет ни `codex`, ни `gpt-` |

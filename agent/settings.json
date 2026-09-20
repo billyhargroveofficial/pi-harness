@@ -31,12 +31,7 @@
     "keepRecentTokens": 20000
   },
   "enabledModels": [
-    "deepseek/deepseek-flash",
-    "openai-codex/gpt-5.6-luna",
-    "openai-codex/gpt-5.6-terra",
-    "openai-codex/gpt-5.6-sol",
-    "openai-codex/gpt-5.5",
-    "openai-codex/gpt-6-astra"
+    "deepseek/deepseek-flash"
   ],
   "skills": [
     "/Users/billy/.agents/skills"
@@ -45,7 +40,7 @@
   "quietStartup": true,
   "statusLine": {
     "type": "command",
-    "command": "/usr/bin/python3 /Users/billy/.local/share/claude-codex-statusline/statusline.py",
+    "command": "/usr/bin/python3 /Users/billy/.local/share/claude-codex-statusline/statusline.py --no-quota",
     "placement": "footer",
     "timeoutMs": 5000
   }

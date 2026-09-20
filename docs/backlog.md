@@ -25,6 +25,11 @@
 
 ## Сделано
 
+- **pi — только DeepSeek.** Удалены Codex-провайдер и его модели (`enabledModels`, `models-store.json`, `auth.json`),
+  расширение `codex-web-search.ts`; статус-строка больше не запрашивает квоту Codex (`--no-quota`).
+- **Статус-строка.** `pi-statusline` + тот же скрипт, что у Claude Code: реальный уровень мышления из сессии pi
+  (а не `effortLevel` из настроек CC), размер контекста `1M`, без квоты; патч `fix-pi-statusline-refresh.mjs`
+  перерисовывает строку на `thinking_level_select`. [`statusline.md`](statusline.md).
 - **Светлая тема `claude-code-light-hc` + патч к `better-claude-code-ui`** — приглушённые токены до ≥4.5:1, светлый diff-chrome,
   глоу спиннера от темы, контекстные строки диффа без `DIM`, отключённый футер cc-ui. Итерация 2 в [`light-theme.md`](light-theme.md),
   замеры до/после и способы проверки — [`verification.md`](verification.md) п. 7–9.
