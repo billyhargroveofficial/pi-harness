@@ -3,7 +3,7 @@
   "name": "claude-code-light-hc",
   "vars": {
     "claude": "#C4633C",
-    "claudeShimmer": "#2438C0",
+    "claudeShimmer": "#8FA0F5",
     "autoAccept": "#7A00E6",
     "bashBorder": "#D6006F",
     "permission": "#4056E8",
