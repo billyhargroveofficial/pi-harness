@@ -81,7 +81,18 @@ echo
 
 # Патчи к установленным пакетам (upstream-баги, см. docs/light-theme.md).
 # Идемпотентны: уже пропатченное повторно не трогают.
+# Сами файлы тоже кладём в ~/.pi/agent/patches, иначе после `pi update`
+# (он сносит правки в node_modules) их негде взять на этой машине.
 echo "Патчи к пакетам (patches/):"
+mkdir -p "$AGENT_DIR/patches"
+for f in "$REPO_DIR"/patches/*.mjs; do
+  [ -e "$f" ] || continue
+  dst="$AGENT_DIR/patches/$(basename "$f")"
+  if [ ! -e "$dst" ] || ! cmp -s "$f" "$dst"; then
+    cp -p "$f" "$dst"
+    echo "  + $dst"
+  fi
+done
 for f in "$REPO_DIR"/patches/*.mjs; do
   [ -e "$f" ] || continue
   echo "  $(basename "$f")"
