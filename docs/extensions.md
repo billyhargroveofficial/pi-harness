@@ -1,6 +1,40 @@
 # Расширения: что стоит, зачем и с какими настройками
 
-## pi-claude-code-ui (1.0.83)
+**Актуальный набор (сентябрь 2026):** `better-claude-code-ui@0.1.8` (рендер тулов в стиле CC, из него же тема),
+`pi-statusline` (статус-строка = тот же скрипт, что в Claude Code — см. [`statusline.md`](statusline.md)),
+`@tintinweb/pi-subagents`, `pi-deepseek-search`, `pi-live-throughput`, `pi-mcp-adapter`. Разделы ниже — по пакетам;
+`pi-claude-code-ui` оставлен установленным, но **отключён** (`"extensions": []`), его место занял форк.
+
+## better-claude-code-ui (0.1.8)
+
+Клон-форк `pi-claude-code-ui`: те же задачи (баннер, спиннер с CC-вербами, статус-строка, CC-рендер тулов,
+Shiki-диффы, группировка вызовов), но без двух багов того пакета: chrome берётся из токенов **активной темы** (без
+`+64`-осветления), а SGR-парсер не портит truecolor. Плюс `host-patches.ts`: патчит два публичных класса pi
+(`AssistantMessageComponent`, `InteractiveMode`) рантаймом — пустые строки от скрытых thinking-блоков и мусорный
+статус `Tool output: expanded` после `Ctrl+O`.
+
+Темы: шесть CC-палитр (`claude-code-dark/light`, `-ansi`, `-daltonized`). Светлая тема нашей парой не используется —
+вместо неё `claude-code-light-hc` (см. [`light-theme.md`](light-theme.md)), а её статус-строка отключена патчем в пользу
+`pi-statusline`.
+
+Патч: `patches/fix-better-cc-ui-light-legibility.mjs` — светлый diff-chrome, глоу спиннера от темы, контекстные строки
+диффа без `DIM`, отключённый футер. Патч применяется `install.sh`, идемпотентен, воспроизводим из чистого апстрима
+байт-в-байт (команды — в [`verification.md`](verification.md), п. 7).
+
+Ключи настроек — те же, что у предшественника (`~/.pi/settings.json`, отдельный файл, потому что расширения этого
+семейства читают не `~/.pi/agent/settings.json`): `toolBackground`, `groupToolCalls`, `thinkingMode: "full"`,
+`bashCollapsedLines`, `diffCollapsedLines`, `themeAdaptive`, `toolBranchColorMode`.
+
+## pi-statusline (0.0.2)
+
+Запускает внешнюю команду статус-строки с CC-совместимым JSON на stdin и печатает её stdout в футере. Конфиг —
+`statusLine` в `agent/settings.json`. Полностью — [`statusline.md`](statusline.md).
+
+## pi-claude-code-ui (1.0.83) — отключён
+
+Предшественник: те же тулы/диффы, шёл из npm как `npm:pi-claude-code-ui`; в `agent/settings.json` у него стоит
+`"extensions": []`, то есть код расширения не грузится (пакет остаётся ради темы и на случай возврата).
+Патчи `patches/fix-cc-tools-light-chrome.mjs` — про него и применяются по-прежнему, если пакет вернуть в работу.
 
 Рендерер тулов в стиле Claude Code. Переопределяет встроенные тулы (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`), регистрируя свои с тем же именем — execution берётся из встроенных, меняется только отображение.
 

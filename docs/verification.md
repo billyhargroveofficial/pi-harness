@@ -90,3 +90,46 @@ grep -n "readOutputMode\|searchOutputMode\|bashOutputMode" \
 - **Юнит-тесты парсера SGR и воспроизводимость патча.** Патченная функция вырезается из `node_modules` и прогоняется на 11 кейсах; сам скрипт патча из чистого апстрима (`npm pack`) воспроизводит текущий файл байт-в-байт и при повторном запуске ничего не делает.
 
 Ключевое отличие от пункта 1: реплей нужен для проверки *рендера*, а pty-прогон — для проверки *взаимодействия* настроек, детекта схемы терминала и патчей расширения в одном живом процессе.
+
+## 7. Патч из чистого апстрима — байт-в-байт
+
+Для `better-claude-code-ui` воспроизводимость проверяется так (пакет ставится заново, патч применяется в поддельный HOME):
+
+```bash
+cd /tmp && rm -rf ccui-clean && mkdir ccui-clean && cd ccui-clean
+npm pack better-claude-code-ui@0.1.8 && tar xzf *.tgz
+rm -rf /tmp/ccui-patched && mkdir -p /tmp/ccui-patched/.pi/agent/npm/node_modules/better-claude-code-ui
+cp -r package/extension /tmp/ccui-patched/.pi/agent/npm/node_modules/better-claude-code-ui/extension
+HOME=/tmp/ccui-patched node ~/repos/pi-harness/patches/fix-better-cc-ui-light-legibility.mjs
+for f in index.ts palette.ts spinner.ts tools/diff.ts; do
+  cmp /tmp/ccui-patched/.pi/agent/npm/node_modules/better-claude-code-ui/extension/$f \
+      ~/.pi/agent/npm/node_modules/better-claude-code-ui/extension/$f && echo "$f идентичен"
+done
+```
+
+Результат: все четыре файла совпадают с пропатченными в `node_modules`; повторный запуск патча печатает «все блоки уже на месте» (идемпотентность).
+
+## 8. Юнит-тест глоу-рампы спиннера
+
+Функция вырезается из пропатченного файла и прогоняется отдельно (файл копируется в `/tmp`: Node отказывается стрипать типы внутри `node_modules`):
+
+```bash
+mkdir -p /tmp/verify-ext && cd /tmp/verify-ext
+sed 's|"\./palette.js"|"\./palette.ts"|g' ~/.pi/agent/npm/node_modules/better-claude-code-ui/extension/{spinner,palette}.ts
+# блок от «/** Fallback glow ramp» до «function thinkingGlowPaint(» → glow.ts с export
+node --experimental-strip-types harness.mjs
+```
+
+Считается контраст **всей фазы анимации** (41 точка) к фону схемы и собирается полная строка спиннера:
+
+```
+light: #6a6a6a → #3b3b3b   худший контраст за цикл = 5.41:1  OK
+dark:  #999999 → #c9c9c9   худший контраст за цикл = 5.85:1  OK
+⏺ Thinking… (5s · thinking with max effort)   ← thinking-текст #454545, 9.59:1 на белом
+```
+
+## 9. Контраст из ANSI-потока (с учётом DIM)
+
+Захват pty разбирается по SGR-параметрам: трекаются `fg`, `bg`, атрибут `2` (dim) и полный сброс `0`. `DIM` считается как в терминале — 50 % к фону, иначе контекстные строки диффа выглядят «нормальными», хотя на экране они бледные. Только с этим учётом видно разницу «до/после»: контекст диффа был 1.35:1 (DIM), стал 9.63:1 (без DIM).
+
+Скрипт-анализатор — тот же принцип, что в п. 6, но с полным сбросом: без обработки `\e[0m` цвет предыдущего сегмента (например, цвет вертикальной линейки диффа) ошибочно приписывается следующему тексту и даёт ложные 1.1:1.

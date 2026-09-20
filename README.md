@@ -15,7 +15,7 @@
 | `agent/AGENTS.md` | `~/.pi/agent/AGENTS.md` — глобальные инструкции агенту |
 | `agent/subagents.json` | `~/.pi/agent/subagents.json` — настройки субагентов |
 | `agent/agents/*.md` | `~/.pi/agent/agents/` — кастомные типы субагентов |
-| `agent/themes/*.json` | `~/.pi/agent/themes/` — кастомные темы |
+| `agent/themes/*.json` | `~/.pi/agent/themes/` — кастомные темы (`claude-code-light-hc`, `claude-green*`, `billy-aurora`) |
 | `ext/settings.json` | `~/.pi/settings.json` — конфиг расширений (см. ниже, почему не `agent/`) |
 | `patches/*.mjs` | идемпотентные патчи к установленным пакетам; правит `node_modules`, применяет `install.sh` |
 | `docs/` | журнал решений, замеры, что проверялось, бэклог |
@@ -24,11 +24,12 @@
 
 ## Стек
 
-- **pi** 0.85.1
+- **pi** 0.86.0
 - **провайдер/модель**: `deepseek/deepseek-flash` (DeepSeek V4.1 Flash, `openai-completions`, контекст 1M, max output 384k)
 - **thinking**: уровень `max` по умолчанию, уровень `medium`/`xhigh` у модели скрыт (`thinkingLevelMap`)
 - **thinking-блоки скрыты**: видно `Thinking…` во время и `Thought for Ns` после, содержимое не рендерится (`hideThinkingBlock: true`)
-- **тема**: авто по системной теме macOS — светлая `claude-green-light` / тёмная `claude-green` (тёплые нейтральные фоны в духе Claude Code, зелёный акцент `#A7C080` вместо рыжего). Детект — `CSI ? 996 n` + подписка на mode 2031, Ghostty это отдаёт
+- **тема**: авто по системной теме macOS — светлая `claude-code-light-hc` / тёмная `claude-code-dark` (палитра Claude Code; в светлой приглушённые токены подтянуты до ≥4.5:1). Детект — `CSI ? 996 n` + подписка на mode 2031, Ghostty это отдаёт
+- **статус-строка**: `pi-statusline` запускает тот же скрипт, что и Claude Code (`~/.local/share/claude-codex-statusline/statusline.py`) — папка, модель, контекст, недельная квота Codex
 - **TUI**: fullscreen
 - **компактный вывод тулов**: свёрнутая bash-строка — ровно одна строка, вывод только по `Ctrl+O`
 - **метрики**: TPS / TTFT / avg через `pi-live-throughput`
@@ -40,7 +41,9 @@
 
 | Пакет | Версия | Зачем |
 |---|---|---|
-| `pi-claude-code-ui` | 1.0.83 | Рендер тулов в стиле Claude Code: группировка вызовов, Shiki-диффы, `Thought for Ns`, спиннер с CC-вербами, MCP-рендер |
+| `better-claude-code-ui` | 0.1.8 | Рендер тулов в стиле Claude Code: группировка вызовов, Shiki-диффы, `Thought for Ns`, спиннер с CC-вербами, MCP-рендер(+ тема `claude-code-dark`) |
+| `pi-statusline` | 0.0.2 | Статус-строка внешней командой (CC-совместимый JSON на stdin) — внизу та же строка, что в Claude Code |
+| `pi-mcp-adapter` | — | MCP-серверы в pi (notion, telegram) |
 | `@tintinweb/pi-subagents` | 0.19.0 | Субагенты и workflow-оркестрация (`Agent`, `SubagentWorkflow`) |
 | `pi-deepseek-search` | 1.0.20 | Нативный веб-поиск DeepSeek как инструмент |
 | `pi-live-throughput` | 0.2.0 | TPS / avg TPS / TTFT / peak / input / cache read после каждого ответа |
@@ -50,7 +53,8 @@
 Подробности по каждому решению — в `docs/`:
 
 - [`docs/extensions.md`](docs/extensions.md) — что за расширения, какие у них настройки и что у них мертво
-- [`docs/light-theme.md`](docs/light-theme.md) — авто light/dark, светлая тема и патчи к `pi-claude-code-ui`
+- [`docs/statusline.md`](docs/statusline.md) — статус-строка как в Claude Code: `pi-statusline` + тот же скрипт
+- [`docs/light-theme.md`](docs/light-theme.md) — авто light/dark, светлая тема и патчи к cc-ui (две итерации)
 - [`docs/compact-output.md`](docs/compact-output.md) — как сделан компактный вывод и замеры «до/после»
 - [`docs/verification.md`](docs/verification.md) — как это проверялось (без веры на слово)
 - [`docs/backlog.md`](docs/backlog.md) — что ещё хочется доделать, сюда же складываются идеи

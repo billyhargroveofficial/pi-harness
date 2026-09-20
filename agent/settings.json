@@ -2,11 +2,17 @@
   "packages": [
     "npm:pi-deepseek-search@1.0.20",
     "npm:@tintinweb/pi-subagents@0.19.0",
-    "npm:pi-claude-code-ui",
-    "npm:pi-live-throughput"
+    {
+      "source": "npm:pi-claude-code-ui",
+      "extensions": []
+    },
+    "npm:pi-live-throughput",
+    "npm:pi-mcp-adapter",
+    "npm:better-claude-code-ui@0.1.8",
+    "npm:pi-statusline"
   ],
-  "lastChangelogVersion": "0.85.1",
-  "theme": "claude-green-light/claude-green",
+  "lastChangelogVersion": "0.86.0",
+  "theme": "claude-code-light-hc/claude-code-dark",
   "defaultProvider": "deepseek",
   "defaultModel": "deepseek-flash",
   "defaultThinkingLevel": "max",
@@ -25,15 +31,22 @@
     "keepRecentTokens": 20000
   },
   "enabledModels": [
-    "deepseek/deepseek-flash"
+    "deepseek/deepseek-flash",
+    "openai-codex/gpt-5.6-luna",
+    "openai-codex/gpt-5.6-terra",
+    "openai-codex/gpt-5.6-sol",
+    "openai-codex/gpt-5.5",
+    "openai-codex/gpt-6-astra"
   ],
   "skills": [
-    "/Users/billy/.agents/skills",
-    "-/Users/billy/.agents/skills/chatgptweb-clean-archieved-chats/SKILL.md",
-    "-/Users/billy/.agents/skills/chatgptweb-clean-library/SKILL.md",
-    "-/Users/billy/.agents/skills/chatgptweb-imagegen/SKILL.md",
-    "-/Users/billy/.agents/skills/codex-reset-guard/SKILL.md"
+    "/Users/billy/.agents/skills"
   ],
   "tuiMode": "fullscreen",
-  "quietStartup": false
+  "quietStartup": true,
+  "statusLine": {
+    "type": "command",
+    "command": "/usr/bin/python3 /Users/billy/.local/share/claude-codex-statusline/statusline.py",
+    "placement": "footer",
+    "timeoutMs": 5000
+  }
 }

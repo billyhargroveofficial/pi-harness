@@ -43,6 +43,29 @@ grep -o 'npm:[^"]*' "$AGENT_DIR/settings.json" | sed 's/^npm://' | while read -r
   pi install "npm:$pkg" || echo "  ! не удалось поставить $pkg"
 done
 
+# pi-claude-code-ui стоит установленным, но с погашенным расширением (его место занял
+# better-claude-code-ui, см. docs/extensions.md). `pi install` возвращает ему дефолтные
+# extensions и расширение снова начинает грузиться — включая свою статус-строку,
+# которая дерётся с pi-statusline за футер. Поэтому фильтр возвращаем после установки.
+python3 - "$AGENT_DIR/settings.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+data = json.load(open(path))
+FILTERED = {"npm:pi-claude-code-ui", "npm:pi-claude-code-ui@latest"}
+changed = False
+for i, entry in enumerate(data.get("packages", [])):
+    source = entry.get("source") if isinstance(entry, dict) else entry
+    if isinstance(source, str) and source in FILTERED and (not isinstance(entry, dict) or entry.get("extensions") != []):
+        data["packages"][i] = {"source": source, "extensions": []}
+        changed = True
+if changed:
+    json.dump(data, open(path, "w"), indent=2, ensure_ascii=False)
+    open(path, "a").write("\n")
+    print("  pi-claude-code-ui: расширение снова погашено (extensions: [])")
+else:
+    print("  pi-claude-code-ui: фильтр на месте")
+PY
+
 echo
 
 # Патчи к установленным пакетам (upstream-баги, см. docs/light-theme.md).
