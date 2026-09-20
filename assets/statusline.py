@@ -185,7 +185,9 @@ def render(data, quota, now=None, show_quota=True):
     name = model.get('display_name') or model.get('id') or 'GPT'
     name = re.sub(r'\s*\((\w+) context\)', r' \1', name)
     # Приоритет: уровень из сессии pi → дефолт pi → effort из нагрузки → настройки Claude Code.
-    pi_payload = bool(data.get('pi'))
+    # isinstance, а не bool: pi всегда шлёт объект pi, и пустой тоже должен считаться за pi
+    # (иначе падаем в настройки Claude Code и показываем чужой effortLevel).
+    pi_payload = isinstance(data.get('pi'), dict)
     effort = (pi_thinking_level(data) if pi_payload else None)
     if not effort and pi_payload:
         effort = pi_default_thinking_level()
