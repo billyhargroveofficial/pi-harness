@@ -147,6 +147,14 @@ TTFT — от `before_provider_request` до первого содержател
 
 Пользовательские типы — `agent/agents/*.md` (frontmatter: `model`, `thinking`, `tools`, `extensions`, `prompt_mode`). Все четыре ходят через `deepseek/deepseek-flash` и имеют `web_search`. Важно: не ставить `isolated: true` там, где нужен веб-поиск — этот режим отключает расширения.
 
+### Патч к пакету
+
+В 0.19.0 манифест держит `typebox` и `@sinclair/typebox` в `dependencies`, хотя оба — хост-пакеты: pi отдаёт их расширениям своими jiti-алиасами (`getAliases()` в `dist/core/extensions/loader.js`). На старте pi ругается: физическая копия может перебить маппинг хоста и создать дублирующие модули/классы. Патч `patches/fix-subagents-typebox-peers.mjs` переносит оба пакета в `peerDependencies` с диапазоном `"*"` (как в `pi-mcp-adapter`) и убирает дубли из `node_modules`. Идемпотентен, применяется `install.sh`; после `pi update` (переустановит пакет) — запустить заново:
+
+```bash
+node ~/.pi/agent/patches/fix-subagents-typebox-peers.mjs
+```
+
 ## pi-deepseek-search (1.0.20)
 
 Нативный поиск DeepSeek как инструмент `web_search`: свежие данные + прямые ссылки на источники.

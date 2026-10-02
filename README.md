@@ -46,7 +46,7 @@
 | `better-claude-code-ui` | 0.1.8 | Рендер тулов в стиле Claude Code: группировка вызовов, Shiki-диффы, `Thought for Ns`, спиннер с CC-вербами, MCP-рендер(+ тема `claude-code-dark`) |
 | `pi-statusline` | 0.0.2 | Статус-строка внешней командой (CC-совместимый JSON на stdin) — внизу та же строка, что в Claude Code; патч `fix-pi-statusline-refresh` |
 | `pi-mcp-adapter` | — | MCP-серверы в pi (notion, telegram) |
-| `@tintinweb/pi-subagents` | 0.19.0 | Субагенты и workflow-оркестрация (`Agent`, `SubagentWorkflow`) |
+| `@tintinweb/pi-subagents` | 0.19.0 | Субагенты и workflow-оркестрация (`Agent`, `SubagentWorkflow`); патч `fix-subagents-typebox-peers` |
 | `pi-deepseek-search` | 1.0.20 | Нативный веб-поиск DeepSeek как инструмент |
 | `pi-live-throughput` | 0.2.0 | TPS / avg TPS / TTFT / peak / input / cache read после каждого ответа |
 
