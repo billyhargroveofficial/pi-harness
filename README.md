@@ -29,7 +29,8 @@
 JSON-пути адаптируются к `$HOME`; существующие команды получения ключей в
 `models.json` сохраняются. `auth.json` и OAuth-токены не копируются.
 Конфиг `agent/extensions/pi-openai-toolkit/config.json` включает hosted web search
-для Codex. На Linux нужен Python 3 и `pi` в PATH; приложения и туннели Mac не переносятся.
+для Codex. Установщик поднимает старые npm-пакеты до проверенного минимума из
+`assets/tested-package-versions.json`, не понижая более новые версии. На Linux нужен Python 3 и `pi` в PATH; приложения и туннели Mac не переносятся.
 
 ## Стек
 
@@ -56,11 +57,11 @@ JSON-пути адаптируются к `$HOME`; существующие ко
 |---|---|---|
 | `better-claude-code-ui` | 0.1.8 | Рендер тулов в стиле Claude Code: группировка вызовов, Shiki-диффы, `Thought for Ns`, спиннер с CC-вербами, MCP-рендер(+ тема `claude-code-dark`) |
 | `pi-statusline` | 0.0.2 | Статус-строка внешней командой (CC-совместимый JSON на stdin) — внизу та же строка, что в Claude Code; патч `fix-pi-statusline-refresh` |
-| `pi-mcp-adapter` | — | MCP-серверы в pi (notion, telegram) |
+| `pi-mcp-adapter` | 5.0.0 | MCP-серверы в pi (notion, telegram) |
 | `@tintinweb/pi-subagents` | 0.19.0 проверена; npm без version pin | Субагенты и workflow-оркестрация; патчи `fix-subagents-typebox-peers` и `fix-subagents-live-tools` (live Activity) |
 | `pi-deepseek-search` | 1.0.20 | Нативный веб-поиск DeepSeek как инструмент |
-| `pi-live-throughput` | 0.2.0 | TPS / avg TPS / TTFT / peak / input / cache read после каждого ответа |
-| `pi-openai-toolkit` | — | Инструменты интеграции OpenAI, добавлен в текущие настройки |
+| `pi-live-throughput` | 0.3.0 | TPS / avg TPS / TTFT / peak / input / cache read после каждого ответа |
+| `pi-openai-toolkit` | 0.20.8 | Инструменты интеграции OpenAI, добавлен в текущие настройки |
 | `zzzz-compact-tools.ts` | локальный | Однострочные тулколы без вывода, штатное раскрытие, стабильная позиция мигающей точки |
 
 Конфиг расширений — `ext/settings.json` → `~/.pi/settings.json`. Важный нюанс: расширения семейства `pi-claude-code-ui` читают **не** `~/.pi/agent/settings.json`, а жёстко `$HOME/.pi/settings.json` и `$(pwd)/.pi/settings.json` (HOME-файл перекрывает проектный). Поэтому конфиг расширений живёт отдельным файлом и не смешивается с настройками pi.

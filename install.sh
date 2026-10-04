@@ -75,6 +75,32 @@ grep -o 'npm:[^"]*' "$AGENT_DIR/settings.json" | sed 's/^npm://' | while read -r
   pi install "npm:$pkg" || echo "  ! не удалось поставить $pkg"
 done
 
+# `pi install` may reuse an old installed package. Raise versions below our
+# tested baseline, but never downgrade newer upstream installations.
+upgrades=()
+while IFS= read -r pkg; do
+  [ -n "$pkg" ] && upgrades+=("$pkg")
+done < <(python3 - "$REPO_DIR/assets/tested-package-versions.json" "$AGENT_DIR/npm/node_modules" <<'PY'
+import json, pathlib, re, sys
+baseline = json.loads(pathlib.Path(sys.argv[1]).read_text())
+root = pathlib.Path(sys.argv[2])
+def version(v):
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:[-+].*)?", v)
+    if not match:
+        raise ValueError(f"Unsupported package version: {v}")
+    return tuple(map(int, match.groups()))
+for name, required in baseline.items():
+    file = root / name / "package.json"
+    installed = json.loads(file.read_text())["version"] if file.exists() else "0.0.0"
+    if version(installed) < version(required):
+        print(f"{name}@{required}")
+PY
+)
+if [ "${#upgrades[@]}" -gt 0 ]; then
+  echo "Поднимаю старые пакеты до проверенных версий: ${upgrades[*]}"
+  npm install --prefix "$AGENT_DIR/npm" --ignore-scripts --no-audit --no-fund "${upgrades[@]}"
+fi
+
 # pi-claude-code-ui стоит установленным, но с погашенным расширением (его место занял
 # better-claude-code-ui, см. docs/extensions.md). `pi install` возвращает ему дефолтные
 # extensions и расширение снова начинает грузиться — включая свою статус-строку,
