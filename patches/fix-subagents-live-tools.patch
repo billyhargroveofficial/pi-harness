@@ -1,0 +1,211 @@
+--- a/src/workflow/host.ts
++++ b/src/workflow/host.ts
+@@ -42,6 +42,7 @@
+ import { getLifetimeTotal } from "../usage.js";
+ import type { WorkflowGateResult, WorkflowHost, WorkflowSpawnResult } from "./runtime.js";
+ import { resolveWorkflowSource } from "./saved.js";
++import { observeWorkflowTools } from "./live-tools.js";
+ 
+ /**
+  * Wall-clock bound on a `gate` command. Generous — a gate is routinely a test
+@@ -256,6 +257,7 @@
+        * rather than re-deriving "the session, else the request" is the whole
+        * point of that field existing.
+        */
++      let unsubscribeTools: (() => void) | undefined;
+       let sessionReady = false;
+       const reportResolved = () => {
+         // Called from BOTH the session hook and the spawn hook, because their
+@@ -326,7 +328,11 @@
+             },
+             // Fires once the child's session exists, which is where the model
+             // and the clamped thinking level first become knowable.
+-            onSessionCreated: () => { sessionReady = true; reportResolved(); },
++            onSessionCreated: session => {
++              unsubscribeTools = observeWorkflowTools(session, 0, request.onProgress);
++              sessionReady = true;
++              reportResolved();
++            },
+             ...(request.schema !== undefined ? { structuredOutput: request.schema } : {}),
+             ...(request.isolation !== undefined ? { isolation: request.isolation } : {}),
+             ...(deps.signal !== undefined ? { signal: deps.signal } : {}),
+@@ -351,6 +357,8 @@
+         // never ran. That is this agent's failure, not the run's: the script
+         // sees `null` and its siblings carry on.
+         return { ok: false, error: error instanceof Error ? error.message : String(error) };
++      } finally {
++        unsubscribeTools?.();
+       }
+     },
+ 
+@@ -361,26 +369,31 @@
+       if (id !== undefined) manager.abort(id);
+     },
+ 
+-    async resumeAgent(agentId, prompt, onResolved) {
++    async resumeAgent(agentId, prompt, onResolved, onProgress) {
+       const id = records.get(agentId);
+       if (id === undefined) {
+         return { ok: false, error: `Cannot resume "${agentId}" — it never started.` };
+       }
+-      const record = await manager.resume(id, prompt, deps.signal);
++      const previous = manager.getRecord(id);
++      // Resume rows need their record/model BEFORE live tool events arrive.
++      onResolved?.({ recordId: id });
++      const info = resolvedInfo(previous);
++      if (info !== undefined) onResolved?.(info);
++      const unsubscribeTools = previous?.session
++        ? observeWorkflowTools(previous.session, previous.toolUses, onProgress)
++        : undefined;
++      let record: AgentRecord | undefined;
++      try {
++        record = await manager.resume(id, prompt, deps.signal);
++      } finally {
++        unsubscribeTools?.();
++      }
+       if (record === undefined) {
+         return {
+           ok: false,
+           error: `Agent ${id} has no session left to resume — records are dropped ten minutes after they finish.`,
+         };
+       }
+-      // The resumed row is built from scratch, so it has to be told the same
+-      // thing the first one was — the child's session already exists, so this is
+-      // simply read back rather than waited for. The id goes first for the same
+-      // reason it does on the spawn path: it is knowable even when the rest is
+-      // not.
+-      onResolved?.({ recordId: id });
+-      const info = resolvedInfo(record);
+-      if (info !== undefined) onResolved?.(info);
+       return toSpawnResult(record);
+     },
+ 
+--- a/src/workflow/runtime.ts
++++ b/src/workflow/runtime.ts
+@@ -66,6 +66,8 @@
+    * `ThinkingLevel`. The worker has already rejected anything off the list.
+    */
+   effort?: string;
++  /** Live completed-tool count and bounded name-only activity. */
++  onProgress?(info: { toolCalls: number; toolActivity: string }): void;
+   isolation?: "worktree";
+   /**
+    * Called by the host once the child's EFFECTIVE configuration is known —
+@@ -205,6 +207,7 @@
+      * the row above it shows the one that ran.
+      */
+     onResolved?: WorkflowSpawnRequest["onResolved"],
++    onProgress?: WorkflowSpawnRequest["onProgress"],
+   ): Promise<WorkflowSpawnResult>;
+   /**
+    * Run a `gate` command and report whether it passed.
+@@ -980,7 +983,17 @@
+             attempt > 1 ? { attempt, lastAttemptReason: "user-retry" as const } : {};
+ 
+           const startedAt = Date.now();
++          // A retry is a fresh child, not the previous attempt's activity.
++          delete base.toolCalls;
++          delete base.toolActivity;
+           emit([{ ...base, queuedAt, startedAt, ...attemptMark }]);
++          let acceptProgress = true;
++          const onProgress: NonNullable<WorkflowSpawnRequest["onProgress"]> = info => {
++            if (!acceptProgress || settled || !inflight.has(agentId)) return;
++            base.toolCalls = info.toolCalls;
++            base.toolActivity = info.toolActivity;
++            emit([{ ...base, queuedAt, startedAt, ...attemptMark, lastProgressAt: Date.now() }]);
++          };
+ 
+           // Mutates `base` rather than emitting a standalone patch: every later
+           // emit spreads it, so the settle path carries the effective values
+@@ -1016,7 +1029,7 @@
+           try {
+             result =
+               resumed !== undefined && resumeAgent !== undefined
+-                ? await resumeAgent(resumed.agentId, payload.prompt, onResolved)
++                ? await resumeAgent(resumed.agentId, payload.prompt, onResolved, onProgress)
+                 : await host.spawnAgent({
+                     agentId,
+                     index,
+@@ -1033,6 +1046,7 @@
+                     // child's worktree does, and hands back `result.gate`.
+                     ...(payload.gate !== undefined ? { gate: payload.gate } : {}),
+                     onResolved,
++                    onProgress,
+                   });
+             if (result.ok) {
+               // Recorded before the gate runs: the child itself finished, so it is
+@@ -1062,6 +1076,7 @@
+           } catch (error) {
+             result = { ok: false, error: error instanceof Error ? error.message : String(error) };
+           } finally {
++            acceptProgress = false;
+             inflight.delete(agentId);
+             live.started = false;
+             semaphore.release();
+--- a/src/workflow/progress.ts
++++ b/src/workflow/progress.ts
+@@ -109,6 +109,8 @@
+   resultPreview?: string;
+   tokens?: number;
+   toolCalls?: number;
++  /** Current tools and at most six completed tool names, without arguments/results. */
++  toolActivity?: string;
+   durationMs?: number;
+ }
+ 
+--- a/src/ui/workflow-dialog.ts
++++ b/src/ui/workflow-dialog.ts
+@@ -551,9 +551,12 @@
+ /** Split a preview into lines, treating an empty preview as absent. */
+ const previewLines = (preview: string | undefined) => (preview ? preview.split("\n") : []);
+ 
+-/** What the Activity body says. There is a count of tool calls, never a list. */
++/** Live name-only activity; full arguments and output remain in the `c` viewer. */
+ function activityBody(entry: WorkflowAgentEntry, state: WorkflowDisplayState): string {
+   if (state === "queued") return WORKFLOW_DIALOG_COPY.availableOnceStarted;
++  if (entry.toolActivity) {
++    return state === "running" ? entry.toolActivity : entry.toolActivity.replace(/^Running:/, "Last active:");
++  }
+   if ((entry.toolCalls ?? 0) > 0) return WORKFLOW_DIALOG_COPY.noTranscript;
+   return isLive(entry) ? WORKFLOW_DIALOG_COPY.noToolCallsYet : WORKFLOW_DIALOG_COPY.noToolCalls;
+ }
+--- /dev/null
++++ b/src/workflow/live-tools.ts
+@@ -0,0 +1,37 @@
++import type { AgentSession } from "@earendil-works/pi-coding-agent";
++
++/** Names/counts only: never copy tool arguments, results, or secrets into progress. */
++export interface WorkflowToolProgress {
++  toolCalls: number;
++  toolActivity: string;
++}
++
++/** One subscription per invocation, including resume; the caller owns teardown. */
++export function observeWorkflowTools(
++  session: Pick<AgentSession, "subscribe">,
++  initialCount: number,
++  report?: (info: WorkflowToolProgress) => void,
++): () => void {
++  if (!report) return () => {};
++  let completed = initialCount;
++  const active = new Map<string, string>();
++  const recent: string[] = [];
++  const publish = () => {
++    const lines: string[] = [];
++    if (active.size) lines.push(`Running: ${[...active.values()].join(", ")}`);
++    if (recent.length) lines.push(`Recent: ${recent.join(" → ")}`);
++    report({ toolCalls: completed, toolActivity: lines.join("\n") });
++  };
++  return session.subscribe(event => {
++    if (event.type === "tool_execution_start") {
++      active.set(event.toolCallId, event.toolName);
++      publish();
++    } else if (event.type === "tool_execution_end") {
++      active.delete(event.toolCallId);
++      completed++;
++      recent.push(event.toolName);
++      if (recent.length > 6) recent.shift();
++      publish();
++    }
++  });
++}

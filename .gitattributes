@@ -1,0 +1,2 @@
+# Unified diff payloads intentionally contain single-space blank context lines.
+patches/*.patch -whitespace

@@ -17,6 +17,8 @@
 | `agent/agents/*.md` | `~/.pi/agent/agents/` — кастомные типы субагентов |
 | `agent/extensions/*.ts` | `~/.pi/agent/extensions/` — локальные UI-расширения, сохраняются при обновлении npm |
 | `tests/compact-tools.mjs` | проверка компактного рендера на установленном pi |
+| `tests/subagents-live-tools.mjs` | регрессии live tool calls workflow; `--live` — проверка на Codex |
+| `update.sh` | обновить npm-пакеты из апстрима, вернуть патчи и проверить live tool calls |
 | `agent/themes/*.json` | `~/.pi/agent/themes/` — кастомные темы (`claude-code-light-hc`, `claude-green*`, `billy-aurora`) |
 | `ext/settings.json` | `~/.pi/settings.json` — конфиг расширений (см. ниже, почему не `agent/`) |
 | `assets/statusline.py` | `~/.local/share/claude-codex-statusline/statusline.py` — скрипт статус-строки (его же использует Claude Code) |
@@ -51,7 +53,7 @@
 | `better-claude-code-ui` | 0.1.8 | Рендер тулов в стиле Claude Code: группировка вызовов, Shiki-диффы, `Thought for Ns`, спиннер с CC-вербами, MCP-рендер(+ тема `claude-code-dark`) |
 | `pi-statusline` | 0.0.2 | Статус-строка внешней командой (CC-совместимый JSON на stdin) — внизу та же строка, что в Claude Code; патч `fix-pi-statusline-refresh` |
 | `pi-mcp-adapter` | — | MCP-серверы в pi (notion, telegram) |
-| `@tintinweb/pi-subagents` | 0.19.0 | Субагенты и workflow-оркестрация (`Agent`, `SubagentWorkflow`); патч `fix-subagents-typebox-peers` |
+| `@tintinweb/pi-subagents` | 0.19.0 проверена; npm без version pin | Субагенты и workflow-оркестрация; патчи `fix-subagents-typebox-peers` и `fix-subagents-live-tools` (live Activity) |
 | `pi-deepseek-search` | 1.0.20 | Нативный веб-поиск DeepSeek как инструмент |
 | `pi-live-throughput` | 0.2.0 | TPS / avg TPS / TTFT / peak / input / cache read после каждого ответа |
 | `pi-openai-toolkit` | — | Инструменты интеграции OpenAI, добавлен в текущие настройки |
@@ -66,21 +68,28 @@
 - [`docs/light-theme.md`](docs/light-theme.md) — авто light/dark, светлая тема и патчи к cc-ui (две итерации)
 - [`docs/compact-output.md`](docs/compact-output.md) — как сделан компактный вывод и замеры «до/после»
 - [`docs/verification.md`](docs/verification.md) — как это проверялось (без веры на слово)
+- [`docs/subagents-live-tools.md`](docs/subagents-live-tools.md) — исправление live Activity workflow, проверки на Codex и безопасные upstream-обновления
 - [`docs/backlog.md`](docs/backlog.md) — что ещё хочется доделать, сюда же складываются идеи
 
 ## Как обновлять
 
 ```bash
-pi update --all                 # pi + пакеты
-for p in ~/.pi/agent/patches/*.mjs; do node "$p"; done   # pi update сносит правки в node_modules
+./update.sh                     # npm-пакеты + патчи + офлайн-регрессии
+./update.sh --all               # то же, вместе с обновлением Pi
+# Или вручную после обычного pi update --extensions / --all:
+for p in ~/.pi/agent/patches/*.mjs; do node "$p"; done   # node_modules перезаписывается
 cp ~/.pi/agent/settings.json    agent/settings.json      # и остальные файлы
 cp ~/.pi/settings.json          ext/settings.json
 cp ~/.pi/agent/extensions/zzzz-compact-tools.ts agent/extensions/
 node tests/compact-tools.mjs
 # models.json не копировать вслепую: literal apiKey заменить командой из env-файла.
-git add agent ext docs tests README.md install.sh
+git add agent ext docs tests patches README.md install.sh update.sh
 git commit -m "sync: <что поменялось>"
 ```
+
+Патчи применяются к апстрим-пакету, не требуют форка. Live-tools overlay проверяет все
+контексты до записи и отказывается править неизвестный изменённый код; см.
+[`docs/subagents-live-tools.md`](docs/subagents-live-tools.md). После патча — `/reload`.
 
 ## Приватность
 

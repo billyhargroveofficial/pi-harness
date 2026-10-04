@@ -4,7 +4,7 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-AGENT_DIR="${PI_AGENT_DIR:-$HOME/.pi/agent}"
+AGENT_DIR="${PI_CODING_AGENT_DIR:-${PI_AGENT_DIR:-$HOME/.pi/agent}}"
 EXT_CONFIG="$HOME/.pi/settings.json"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 
@@ -92,7 +92,7 @@ echo
 # (он сносит правки в node_modules) их негде взять на этой машине.
 echo "Патчи к пакетам (patches/):"
 mkdir -p "$AGENT_DIR/patches"
-for f in "$REPO_DIR"/patches/*.mjs; do
+for f in "$REPO_DIR"/patches/*.mjs "$REPO_DIR"/patches/*.patch; do
   [ -e "$f" ] || continue
   dst="$AGENT_DIR/patches/$(basename "$f")"
   if [ ! -e "$dst" ] || ! cmp -s "$f" "$dst"; then
