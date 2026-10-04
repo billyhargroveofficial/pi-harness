@@ -9,13 +9,14 @@
     "npm:pi-live-throughput",
     "npm:pi-mcp-adapter",
     "npm:better-claude-code-ui@0.1.8",
-    "npm:pi-statusline"
+    "npm:pi-statusline",
+    "npm:pi-openai-toolkit"
   ],
-  "lastChangelogVersion": "0.86.0",
+  "lastChangelogVersion": "1.0.2",
   "theme": "claude-code-light-hc/claude-code-dark",
-  "defaultProvider": "deepseek",
-  "defaultModel": "deepseek-flash",
-  "defaultThinkingLevel": "max",
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-6.1-sol",
+  "defaultThinkingLevel": "medium",
   "hideThinkingBlock": true,
   "terminal": {
     "showImages": true
@@ -27,11 +28,13 @@
   "autocompleteMaxVisible": 7,
   "compaction": {
     "enabled": true,
-    "reserveTokens": 16384,
-    "keepRecentTokens": 20000
+    "reserveTokens": 1000,
+    "keepRecentTokens": 500
   },
   "enabledModels": [
-    "deepseek/deepseek-flash"
+    "deepseek/deepseek-flash",
+    "runpod-qwen-cyber/qwen-cyber-bf16",
+    "openai-codex/gpt-6.1-sol"
   ],
   "skills": [
     "/Users/billy/.agents/skills"
@@ -43,5 +46,8 @@
     "command": "/usr/bin/python3 /Users/billy/.local/share/claude-codex-statusline/statusline.py --no-quota",
     "placement": "footer",
     "timeoutMs": 5000
-  }
+  },
+  "extensions": [
+    "-builtin:mcp"
+  ]
 }

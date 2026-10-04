@@ -2,9 +2,9 @@
 
 Мой рабочий сетап [pi](https://pi.dev) (AI coding agent CLI) — конфиги, темы, расширения и решения с замерами.
 
-Назначение репы: держать харнесс версионируемым и переносимым. Здесь лежат только текстовые конфиги; сами расширения ставятся из npm, секретов в репе нет.
+Назначение репы: держать харнесс версионируемым и переносимым. Здесь лежат конфиги, точечные патчи и небольшие локальные UI-расширения; основные расширения ставятся из npm, секретов в репе нет.
 
-Принцип подбора: **только готовые расширения**. Свой код не пишем — если готового решения нет, задача либо откладывается, либо закрывается настройкой (см. `docs/backlog.md`); если решение упирается в баг установленного пакета — точечным патчем в `patches/`.
+Принцип подбора: **готовые расширения в первую очередь**. Баги пакетов закрываются точечными патчами в `patches/`. Авторизованное исключение — `agent/extensions/zzzz-compact-tools.ts`: компактный display-only рендер тулов, которого нет в настройках установленного UI.
 
 ## Что внутри
 
@@ -15,6 +15,8 @@
 | `agent/AGENTS.md` | `~/.pi/agent/AGENTS.md` — глобальные инструкции агенту |
 | `agent/subagents.json` | `~/.pi/agent/subagents.json` — настройки субагентов |
 | `agent/agents/*.md` | `~/.pi/agent/agents/` — кастомные типы субагентов |
+| `agent/extensions/*.ts` | `~/.pi/agent/extensions/` — локальные UI-расширения, сохраняются при обновлении npm |
+| `tests/compact-tools.mjs` | проверка компактного рендера на установленном pi |
 | `agent/themes/*.json` | `~/.pi/agent/themes/` — кастомные темы (`claude-code-light-hc`, `claude-green*`, `billy-aurora`) |
 | `ext/settings.json` | `~/.pi/settings.json` — конфиг расширений (см. ниже, почему не `agent/`) |
 | `assets/statusline.py` | `~/.local/share/claude-codex-statusline/statusline.py` — скрипт статус-строки (его же использует Claude Code) |
@@ -25,21 +27,24 @@
 
 ## Стек
 
-- **pi** 0.86.0
-- **провайдер/модель**: `deepseek/deepseek-flash` (DeepSeek V4.1 Flash, `openai-completions`, контекст 1M, max output 384k)
-- **thinking**: уровень `max` по умолчанию, уровень `medium`/`xhigh` у модели скрыт (`thinkingLevelMap`)
+Снимок локальной конфигурации: **4 октября 2026** (не заявление о последних версиях npm).
+
+- **pi** 1.0.2
+- **провайдер/модель по умолчанию**: `openai-codex/gpt-6.1-sol`
+- **другие доступные модели**: `deepseek/deepseek-flash` и `runpod-qwen-cyber/qwen-cyber-bf16` через локальный туннель `127.0.0.1:18080`
+- **thinking**: `medium` по умолчанию; у DeepSeek уровни `medium`/`xhigh` скрыты (`thinkingLevelMap`)
+- **compaction**: текущие локальные значения `reserveTokens: 1000`, `keepRecentTokens: 500`
 - **thinking-блоки скрыты**: видно `Thinking…` во время и `Thought for Ns` после, содержимое не рендерится (`hideThinkingBlock: true`)
 - **тема**: авто по системной теме macOS — светлая `claude-code-light-hc` / тёмная `claude-code-dark` (палитра Claude Code; в светлой приглушённые токены подтянуты до ≥4.5:1). Детект — `CSI ? 996 n` + подписка на mode 2031, Ghostty это отдаёт
 - **статус-строка**: `pi-statusline` запускает тот же скрипт, что и Claude Code, с флагом `--no-quota` — папка, модель, размер контекста (`1M`), **реальный** уровень мышления и токены; квота Codex в pi не спрашивается
-- **модель**: только `deepseek/deepseek-flash` (Codex-провайдер, его поиск и учётки из pi удалены)
 - **TUI**: fullscreen
-- **компактный вывод тулов**: свёрнутая bash-строка — ровно одна строка, вывод только по `Ctrl+O`
+- **компактный вывод тулов**: одна строка без stdout, диффов, картинок и стриминг-превью; `Ctrl+O` раскрывает обычный рендер, `/compact-tools off` возвращает старый вид. Мигающая точка сохраняет своё место — текст не дёргается
 - **метрики**: TPS / TTFT / avg через `pi-live-throughput`
 - **формулы**: `$$ ... $$` рисуются юникод-текстом силами `pi-claude-code-ui` (картиночный `pi-math` с ним несовместим, снят)
 
 ## Расширения
 
-Ставятся из npm (`pi install npm:<name>`), в репе лежат только их конфиги.
+Основные пакеты ставятся из npm (`pi install npm:<name>`). Локальный компактный рендер хранится в `agent/extensions/` и копируется установщиком.
 
 | Пакет | Версия | Зачем |
 |---|---|---|
@@ -49,6 +54,8 @@
 | `@tintinweb/pi-subagents` | 0.19.0 | Субагенты и workflow-оркестрация (`Agent`, `SubagentWorkflow`); патч `fix-subagents-typebox-peers` |
 | `pi-deepseek-search` | 1.0.20 | Нативный веб-поиск DeepSeek как инструмент |
 | `pi-live-throughput` | 0.2.0 | TPS / avg TPS / TTFT / peak / input / cache read после каждого ответа |
+| `pi-openai-toolkit` | — | Инструменты интеграции OpenAI, добавлен в текущие настройки |
+| `zzzz-compact-tools.ts` | локальный | Однострочные тулколы без вывода, штатное раскрытие, стабильная позиция мигающей точки |
 
 Конфиг расширений — `ext/settings.json` → `~/.pi/settings.json`. Важный нюанс: расширения семейства `pi-claude-code-ui` читают **не** `~/.pi/agent/settings.json`, а жёстко `$HOME/.pi/settings.json` и `$(pwd)/.pi/settings.json` (HOME-файл перекрывает проектный). Поэтому конфиг расширений живёт отдельным файлом и не смешивается с настройками pi.
 
@@ -68,9 +75,13 @@ pi update --all                 # pi + пакеты
 for p in ~/.pi/agent/patches/*.mjs; do node "$p"; done   # pi update сносит правки в node_modules
 cp ~/.pi/agent/settings.json    agent/settings.json      # и остальные файлы
 cp ~/.pi/settings.json          ext/settings.json
-git commit -am "sync: <что поменялось>"
+cp ~/.pi/agent/extensions/zzzz-compact-tools.ts agent/extensions/
+node tests/compact-tools.mjs
+# models.json не копировать вслепую: literal apiKey заменить командой из env-файла.
+git add agent ext docs tests README.md install.sh
+git commit -m "sync: <что поменялось>"
 ```
 
 ## Приватность
 
-В репе нет ключей: `auth.json` пустой, API-ключ DeepSeek не хранится в конфиге, а подтягивается командой из `~/.config/deepseek.env` (см. `agent/models.json`). В `.gitignore` закрыты `auth.json`, `models-store.json`, `sessions/`, `npm/`, `backups/`, `trust.json`.
+Ключи и OAuth-токены в репу не включаются; `auth.json` не отслеживается. DeepSeek читает ключ командой из `~/.config/deepseek.env`. RunPod — из `~/.config/runpod-qwen.env` (`RUNPOD_QWEN_API_KEY`); локальный literal-ключ при синхронизации заменён на эту команду, рабочий конфиг машины не меняется. Codex авторизуется через `/login`. В `.gitignore` закрыты `auth.json`, `models-store.json`, `sessions/`, `npm/`, `backups/`, `trust.json`.

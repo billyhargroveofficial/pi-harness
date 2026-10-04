@@ -33,6 +33,13 @@ mkdir -p "$AGENT_DIR/agents" "$AGENT_DIR/themes"
 for f in "$REPO_DIR"/agent/agents/*.md; do put "$f" "$AGENT_DIR/agents/$(basename "$f")"; done
 for f in "$REPO_DIR"/agent/themes/*.json; do put "$f" "$AGENT_DIR/themes/$(basename "$f")"; done
 
+# Локальные display-only расширения: обновления npm их не перезаписывают.
+mkdir -p "$AGENT_DIR/extensions"
+for f in "$REPO_DIR"/agent/extensions/*.ts; do
+  [ -e "$f" ] || continue
+  put "$f" "$AGENT_DIR/extensions/$(basename "$f")"
+done
+
 # Конфиг расширений семейства claude-code-ui живёт по другому пути (читают $HOME/.pi/settings.json).
 put "$REPO_DIR/ext/settings.json" "$EXT_CONFIG"
 
@@ -48,7 +55,7 @@ if [ -f "$REPO_DIR/assets/statusline.py" ]; then
 fi
 
 echo
-echo "Расширения (ставятся из npm, в репе только конфиги):"
+echo "Расширения из npm (локальные расширения уже скопированы):"
 grep -o 'npm:[^"]*' "$AGENT_DIR/settings.json" | sed 's/^npm://' | while read -r pkg; do
   echo "  pi install npm:$pkg"
   pi install "npm:$pkg" || echo "  ! не удалось поставить $pkg"
@@ -101,4 +108,5 @@ done
 
 echo
 echo "Готово. Ключ DeepSeek не в репе: положи его в ~/.config/deepseek.env как DEEPSEEK_API_KEY=..."
-echo "Затем перезапусти pi (или /reload)."
+echo "Codex: /login openai-codex. Для локального RunPod-туннеля: ~/.config/runpod-qwen.env с RUNPOD_QWEN_API_KEY=..."
+echo "Затем перезапусти pi (или /reload). Компактные тулы включены; Ctrl+O раскрывает вывод."

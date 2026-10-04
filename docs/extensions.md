@@ -1,8 +1,9 @@
 # Расширения: что стоит, зачем и с какими настройками
 
-**Актуальный набор (сентябрь 2026):** `better-claude-code-ui@0.1.8` (рендер тулов в стиле CC, из него же тема),
+**Актуальный набор (4 октября 2026):** `better-claude-code-ui@0.1.8` (рендер тулов в стиле CC, из него же тема),
 `pi-statusline` (статус-строка = тот же скрипт, что в Claude Code — см. [`statusline.md`](statusline.md)),
-`@tintinweb/pi-subagents`, `pi-deepseek-search`, `pi-live-throughput`, `pi-mcp-adapter`. Разделы ниже — по пакетам;
+`@tintinweb/pi-subagents`, `pi-deepseek-search`, `pi-live-throughput`, `pi-mcp-adapter`, `pi-openai-toolkit`
+и локальный `zzzz-compact-tools.ts`. Разделы ниже — по пакетам;
 `pi-claude-code-ui` оставлен установленным, но **отключён** (`"extensions": []`), его место занял форк.
 
 ## better-claude-code-ui (0.1.8)
@@ -21,9 +22,23 @@ Shiki-диффы, группировка вызовов), но без двух �
 диффа без `DIM`, отключённый футер. Патч применяется `install.sh`, идемпотентен, воспроизводим из чистого апстрима
 байт-в-байт (команды — в [`verification.md`](verification.md), п. 7).
 
-Ключи настроек — те же, что у предшественника (`~/.pi/settings.json`, отдельный файл, потому что расширения этого
-семейства читают не `~/.pi/agent/settings.json`): `toolBackground`, `groupToolCalls`, `thinkingMode: "full"`,
-`bashCollapsedLines`, `diffCollapsedLines`, `themeAdaptive`, `toolBranchColorMode`.
+Установленный форк читает `groupToolCalls`, `ccToolsExtraDetail`, `ccTheme` из `~/.pi/settings.json`.
+`/cc-tools group on|off|toggle` переключает группировку, `/cc-tools detail on|off|toggle` — детализацию
+(8 строк в обычном режиме, до 12000 в extra-detail). Старые ключи `previewLines`, `liveToolPreview`,
+`bashCollapsedLines` нельзя считать настройкой этого форка: они относятся к предшественнику ниже.
+
+## Локальный компактный рендер
+
+`agent/extensions/zzzz-compact-tools.ts` — display-only патч `ToolExecutionComponent`, установленный вне npm.
+Все свёрнутые тулы занимают одну строку без результатов и live-preview; `Ctrl+O` сохраняет штатное раскрытие.
+При мигании кружочка его колонка остаётся зарезервированной. `/compact-tools on|off|toggle` управляет режимом
+в памяти процесса. Установку делает `install.sh`; проверки — `node tests/compact-tools.mjs`.
+Подробности и исторические замеры — [`compact-output.md`](compact-output.md).
+
+## pi-openai-toolkit
+
+Добавлен в локальный `agent/settings.json`. Конфиги авторизации и данные запросов в репу не копируются.
+Встроенный MCP отключён через `extensions: ["-builtin:mcp"]`, остаётся установленный `pi-mcp-adapter`.
 
 ## pi-statusline (0.0.2)
 
