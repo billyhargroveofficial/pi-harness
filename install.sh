@@ -24,8 +24,16 @@ put() { # put <src> <dst>
 
 echo "pi-harness: раскладываю конфиги"
 
-put "$REPO_DIR/agent/settings.json"  "$AGENT_DIR/settings.json"
-put "$REPO_DIR/agent/models.json"    "$AGENT_DIR/models.json"
+# Templates contain Billy's Mac paths; adapt them to this account's HOME.
+# Credential sources stay machine-local (never copy auth.json or API keys).
+put_json() {
+  mkdir -p "$(dirname "$2")"
+  backup "$2"
+  python3 "$REPO_DIR/assets/prepare-config.py" "$1" "$2" --home "$HOME" "${@:3}"
+  echo "  -> $2 (portable paths)"
+}
+put_json "$REPO_DIR/agent/settings.json" "$AGENT_DIR/settings.json"
+put_json "$REPO_DIR/agent/models.json"   "$AGENT_DIR/models.json" --preserve-provider-auth
 put "$REPO_DIR/agent/AGENTS.md"      "$AGENT_DIR/AGENTS.md"
 put "$REPO_DIR/agent/subagents.json" "$AGENT_DIR/subagents.json"
 
@@ -38,6 +46,12 @@ mkdir -p "$AGENT_DIR/extensions"
 for f in "$REPO_DIR"/agent/extensions/*.ts; do
   [ -e "$f" ] || continue
   put "$f" "$AGENT_DIR/extensions/$(basename "$f")"
+done
+# Package-local config files (code itself remains installed from npm).
+for f in "$REPO_DIR"/agent/extensions/*/config.json; do
+  [ -f "$f" ] || continue
+  name="$(basename "$(dirname "$f")")"
+  put_json "$f" "$AGENT_DIR/extensions/$name/config.json"
 done
 
 # Конфиг расширений семейства claude-code-ui живёт по другому пути (читают $HOME/.pi/settings.json).

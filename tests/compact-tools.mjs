@@ -24,6 +24,9 @@ const repo = dirname(dirname(fileURLToPath(import.meta.url)));
 const install = (await jiti.import(join(repo, 'agent/extensions/zzzz-compact-tools.ts'))).default;
 const commands = new Map();
 const api = { registerCommand: (name, def) => commands.set(name, def), on() {} };
+if (process.env.COMPACT_LEGACY_FIXTURE) {
+  (await jiti.import(process.env.COMPACT_LEGACY_FIXTURE)).default(api);
+}
 install(api);
 const ui = { requestRender() {} };
 const secret = 'OUTPUT_SHOULD_BE_HIDDEN';
@@ -78,73 +81,49 @@ install(api);
 assertCompact(call);
 console.log('PASS: one row, hidden output, widths 1–200, expanded output, mouse, errors, groups, MCP fallback, command, reload, stable blink');
 
-// Grouping is derived from actual sibling components, including restored sessions.
-const msg = (text = '') => new host.AssistantMessageComponent({
-  role: 'assistant', content: [
-    ...(text ? [{ type: 'text', text }] : []),
-    { type: 'toolCall', name: 'read', id: 'placeholder', arguments: {} },
-  ], stopReason: 'toolUse',
+// No additional grouping: repeated tools stay individual, spacing stays visible.
+const msg = text => new host.AssistantMessageComponent({
+  role: 'assistant', content: [{ type: 'text', text }, { type: 'toolCall', id: 'call', name: 'read', arguments: {} }], stopReason: 'toolUse',
 }, true);
-const readCall = (index, path = `/tmp/file-${index}.txt`) => {
-  const component = new host.ToolExecutionComponent('read', `r${index}`, { path }, {}, {
-    renderShell: 'self',
-    renderCall: () => new tui.Text(`● Read(${path})`, 0, 0),
-    renderResult: () => new tui.Text(secret, 0, 0),
-  }, ui, homedir());
-  component.updateResult(result);
-  return component;
-};
 const transcript = new tui.Container();
-transcript.addChild(msg('Промежуточный комментарий.'));
-const reads = Array.from({ length: 5 }, (_, i) => readCall(i));
-for (const [index, component] of reads.entries()) {
-  transcript.addChild(component);
-  if (index === 1) transcript.addChild(msg()); // invisible thinking/tool-only message
-}
-const originalChildren = [...transcript.children];
-const grouped = transcript.render(100);
-const headerIndex = grouped.findIndex(line => line.includes('Read(5 calls · tail 3)'));
-assert.ok(headerIndex > 0);
-assert.equal(grouped[headerIndex - 1], '', 'one blank line after commentary');
-assert.ok(grouped[headerIndex - 2].includes('Промежуточный'));
-assert.equal(grouped.filter(line => line.includes('Read(')).length, 1);
-assert.equal(grouped.filter(line => line.includes('→')).length, 3);
-assert.match(grouped.join('\n'), /⎿ → \/tmp\/file-2/);
-assert.ok(!grouped.join('\n').includes('/tmp/file-0'));
-assert.ok(!grouped.join('\n').includes(secret));
-assert.deepEqual(transcript.children, originalChildren, 'render must not mutate the transcript tree');
-for (const width of [1, 2, 10, 30, 80, 200]) {
-  assert.ok(transcript.render(width).every(line => tui.visibleWidth(line) <= width));
-}
-reads[0].updateResult({ ...result, isError: true });
-assert.match(transcript.render(100).join('\n'), /✗1/, 'errors outside the tail remain visible in the header');
-const sixth = readCall(5, '/tmp/новый-🦊.txt'); transcript.addChild(sixth);
-const next = transcript.render(100).join('\n');
-assert.match(next, /Read\(6 calls · tail 3\)/);
-assert.match(next, /новый-🦊/); assert.ok(!next.includes('file-2'));
-const clickRows = transcript.render(100);
-const y = clickRows.findIndex(line => line.includes('Read(6'));
-assert.equal(transcript.handleMouse({ x: 0, y, originX: 0, originY: 0, width: 100, height: clickRows.length, type: 'click', button: 'left' }).handled, true);
-assert.ok(transcript.render(100).join('\n').includes(secret), 'click expands the normal output');
-for (const component of [...reads, sixth]) component.setExpanded(false);
-assert.match(transcript.render(100).join('\n'), /tail 3/);
-const spacerRows = new tui.Container();
-spacerRows.addChild(msg('Комментарий.')); spacerRows.addChild(new tui.Spacer(1)); spacerRows.addChild(readCall(8));
-const spaced = spacerRows.render(100);
-const spacedHeader = spaced.findIndex(line => line.includes('Read('));
-assert.equal(spaced[spacedHeader - 1], '');
-assert.ok(spaced[spacedHeader - 2].trim(), 'do not double an existing spacer');
-const broken = new tui.Container();
-broken.addChild(readCall(10)); broken.addChild(readCall(11)); broken.addChild(msg('Разделитель.')); broken.addChild(readCall(12));
-assert.equal(broken.render(100).filter(line => line.includes('Read(')).length, 2, 'visible commentary breaks aggregation');
-const mixed = new tui.Container();
-mixed.addChild(readCall(20)); mixed.addChild(make('bash', { command: 'echo middle' }, undefined)); mixed.addChild(readCall(21));
-assert.equal(mixed.render(100).filter(line => line.includes('Read(')).length, 2, 'different tools break aggregation');
+const assistant = msg('Промежуточный комментарий.');
+transcript.addChild(assistant);
+const reads = Array.from({ length: 5 }, (_, i) => {
+  const path = `/tmp/file-${i}.txt`;
+  const component = make('read', { path }, { renderShell: 'self', renderCall: () => new tui.Text(`● Read(${path})`, 0, 0), renderResult: () => new tui.Text(secret, 0, 0) });
+  component.updateResult(result); transcript.addChild(component); return component;
+});
+const savedChildren = [...transcript.children];
+const rows = transcript.render(100);
+const firstTool = rows.findIndex(line => line.includes('Read('));
+assert.equal(rows[firstTool - 1], ''); assert.ok(rows[firstTool - 2].includes('Промежуточный'));
+assert.equal(rows.filter(line => line.includes('Read(')).length, 5);
+for (let i = 0; i < 5; i++) assert.ok(rows.join('\n').includes(`file-${i}`));
+assert.ok(!rows.join('\n').includes('tail 3'));
+assert.ok(!rows.join('\n').includes(secret));
+assert.deepEqual(transcript.children, savedChildren);
+for (const width of [1, 2, 10, 30, 80, 200]) assert.ok(transcript.render(width).every(line => tui.visibleWidth(line) <= width));
+const user = new host.UserMessageComponent('Юзер.');
+user.render = () => ['Юзер.']; // template with no built-in padding
+const userTranscript = new tui.Container(); userTranscript.addChild(user); userTranscript.addChild(reads[0]);
+assert.equal(userTranscript.render(100)[1], '', 'separator after a user message');
+const userAssistant = new tui.Container(); userAssistant.addChild(user); userAssistant.addChild(new tui.Text('Ответ.', 0, 0));
+assert.deepEqual(userAssistant.render(100).map(line => line.trimEnd()), ['Юзер.', '', 'Ответ.']);
+const existing = new tui.Container(); existing.addChild(user); existing.addChild(new tui.Spacer(1)); existing.addChild(reads[1]);
+assert.equal(existing.render(100).length, 3, 'do not double an existing spacer');
+const clicked = transcript.render(100);
+const clickY = clicked.findIndex(line => line.includes('Read('));
+assert.equal(transcript.handleMouse({ x: 0, y: clickY, originX: 0, originY: 0, width: 100, height: clicked.length, type: 'click', button: 'left' }).handled, true);
+assert.ok(transcript.render(100).join('\n').includes(secret));
+assert.ok(reads.slice(1).every(component => !component.expanded), 'only the clicked tool expands');
+reads[0].setExpanded(false);
 await commands.get('compact-tools').handler('off', ctx);
+assert.deepEqual(userAssistant.render(100).map(line => line.trimEnd()), ['Юзер.', '', 'Ответ.'], 'spacing is independent of output expansion');
 assert.ok(transcript.render(100).join('\n').includes(secret));
 await commands.get('compact-tools').handler('on', ctx);
-install(api); assert.match(transcript.render(100).join('\n'), /Read\(6 calls/, 'reload does not stack wrappers');
-console.log('PASS: commentary spacer, sibling/replay groups, last-three tail, hidden assistant, mixed/visible boundaries, error count, narrow/wide Unicode, mouse expansion, off/on/reload');
+install(api);
+assert.equal(transcript.render(100).filter(line => line.includes('Read(')).length, 5);
+console.log('PASS: individual repeated tools, assistant/user separators, no duplicate padding, mouse offsets, off/on/reload, narrow widths');
 
 const agentDir = process.env.PI_AGENT_DIR ?? join(homedir(), '.pi/agent');
 const builtinsPath = join(agentDir, 'npm/node_modules/better-claude-code-ui/extension/tools/builtins.ts');
@@ -165,35 +144,6 @@ if (existsSync(builtinsPath)) {
     assert.ok(component.render(80).length > 1);
     console.log(`PASS: actual better-claude-code-ui renderer: ${name}`);
   }
-  const { registerGrouping, isGroupingEnabled } = await jiti.import(join(agentDir, 'npm/node_modules/better-claude-code-ui/extension/tools/grouping.ts'));
-  const handlers = new Map();
-  registerGrouping({ on(name, handler) { handlers.set(name, handler); } });
-  await handlers.get('session_start')({}); await handlers.get('agent_start')({});
-  try {
-    const native = new tui.Container();
-    native.addChild(msg('Native renderer.'));
-    const nativeTools = [];
-    for (const [index, name] of ['read', 'read', 'ls'].entries()) {
-      const args = { path: `/tmp/native-${index}` };
-      const id = `native-${index}`;
-      const component = new host.ToolExecutionComponent(name, id, args, {}, defs.get(name), ui, homedir());
-      await handlers.get('tool_execution_start')({ toolName: name, toolCallId: id, args });
-      component.markExecutionStarted(); component.updateResult(result);
-      await handlers.get('tool_execution_end')({ toolName: name, toolCallId: id, result, isError: false });
-      native.addChild(component); nativeTools.push(component);
-    }
-    // ls is missing from the earlier tiny definition allowlist; it still proves
-    // the cross-tool boundary against npm's mixed read/list collapsing.
-    for (const component of nativeTools) component.invalidate();
-    if (isGroupingEnabled()) assert.deepEqual(nativeTools[1].render(100), [], 'fixture must exercise a native hidden member');
-    const text = native.render(100).join('\n');
-    assert.match(text, /Read\(2 calls\)/);
-    assert.match(text, /native-0/); assert.match(text, /native-1/); assert.match(text, /List\(/);
-    const click = native.render(100); const yy = click.findIndex(line => line.includes('Read(2'));
-    native.handleMouse({ x: 0, y: yy, originX: 0, originY: 0, width: 100, height: click.length, type: 'click', button: 'left' });
-    assert.ok(nativeTools.every(component => component.expanded), 'click expands native mixed tool block together');
-    console.log('PASS: actual native hidden members, mixed read/list group, no lost calls, compatible click expansion');
-  } finally { await handlers.get('session_shutdown')({}); }
 } else {
   console.log('SKIP: actual better-claude-code-ui renderer tests (package not installed)');
 }

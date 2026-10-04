@@ -203,6 +203,7 @@ if (process.argv.includes('--live')) {
     promptMode: 'replace',
   }]]));
   const liveManager = new AgentManager();
+  const initialPrompt = `Call bash exactly: printf 'LIVE_TOOL_OK\\n'. Then call read on ${JSON.stringify(join(sdk.getAgentDir(), 'subagents.json'))}. Return LIVE_OK.`;
   const liveEvents = [];
   let result;
   const loader = new sdk.DefaultResourceLoader({
@@ -212,7 +213,7 @@ if (process.argv.includes('--live')) {
       handler: async (_args, ctx) => {
         result = await runWorkflow({
           script: `export const meta = { name: 'live-codex', description: 'live Codex tools' };
-            const answers = await parallel(['a', 'b'].map(label => () => agent("Call bash exactly: printf 'LIVE_TOOL_OK\\\\n'. Then call read on /Users/billy/.pi/agent/subagents.json. Return LIVE_OK.", { label, agentType: 'live-diagnostic' })));
+            const answers = await parallel(['a', 'b'].map(label => () => agent(${JSON.stringify(initialPrompt)}, { label, agentType: 'live-diagnostic' })));
             const resumed = await agent("Call bash exactly: printf 'RESUME_TOOL_OK\\\\n'. Return RESUME_OK.", { resume: 'a' });
             return { answers, resumed };`,
           host: createWorkflowHost({ pi, ctx, manager: liveManager, workflowId: 'live-test' }),
