@@ -14,6 +14,11 @@ spec = importlib.util.spec_from_file_location('prepare_config', helper)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 settings = json.loads((root / 'agent/settings.json').read_text())
+subagents = json.loads((root / 'agent/subagents.json').read_text())
+if subagents.get('scopeModels'):
+    assert all(':' not in entry for entry in settings['enabledModels']), 'pi-subagents scopeModels ignores :thinking suffixes'
+    assert 'openai-codex/gpt-6-sol' in settings['enabledModels']
+    assert settings['modelThinkingLevels']['openai-codex/gpt-6-sol'] == 'xhigh'
 models = json.loads((root / 'agent/models.json').read_text())
 original = copy.deepcopy(models)
 home = Path('/home/flyingkuskus')

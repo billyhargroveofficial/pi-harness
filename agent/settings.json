@@ -39,8 +39,8 @@
   "enabledModels": [
     "deepseek/deepseek-flash",
     "openai-codex/gpt-6.1-sol",
-    "openai-codex/gpt-6-astra:medium",
-    "openai-codex/gpt-6-sol:xhigh"
+    "openai-codex/gpt-6-astra",
+    "openai-codex/gpt-6-sol"
   ],
   "skills": [
     "/Users/billy/.agents/skills"
