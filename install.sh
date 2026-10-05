@@ -5,6 +5,7 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_DIR="${PI_CODING_AGENT_DIR:-${PI_AGENT_DIR:-$HOME/.pi/agent}}"
+export PI_CODING_AGENT_DIR="$AGENT_DIR"
 EXT_CONFIG="$HOME/.pi/settings.json"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 
@@ -70,10 +71,10 @@ fi
 
 echo
 echo "Расширения из npm (локальные расширения уже скопированы):"
-grep -o 'npm:[^"]*' "$AGENT_DIR/settings.json" | sed 's/^npm://' | while read -r pkg; do
+while read -r pkg; do
   echo "  pi install npm:$pkg"
-  pi install "npm:$pkg" || echo "  ! не удалось поставить $pkg"
-done
+  pi install "npm:$pkg"
+done < <(grep -o 'npm:[^"]*' "$AGENT_DIR/settings.json" | sed 's/^npm://')
 
 # `pi install` may reuse an old installed package. Raise versions below our
 # tested baseline, but never downgrade newer upstream installations.
@@ -143,10 +144,10 @@ done
 for f in "$REPO_DIR"/patches/*.mjs; do
   [ -e "$f" ] || continue
   echo "  $(basename "$f")"
-  node "$f" || echo "  ! патч не применился: $(basename "$f")"
+  node "$f"
 done
 
 echo
 echo "Готово. Ключ DeepSeek не в репе: положи его в ~/.config/deepseek.env как DEEPSEEK_API_KEY=..."
-echo "Codex: /login openai-codex. Для локального RunPod-туннеля: ~/.config/runpod-qwen.env с RUNPOD_QWEN_API_KEY=..."
-echo "Затем перезапусти pi (или /reload). Компактные тулы включены; Ctrl+O раскрывает вывод."
+echo "Codex: /login openai-codex. Существующие машинные провайдеры и их авторизация сохранены."
+echo "Затем перезапусти pi: для Kitty-картинок в Orca /reload недостаточно. Компактные тулы включены; Ctrl+O раскрывает вывод."

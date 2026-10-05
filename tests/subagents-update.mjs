@@ -13,6 +13,11 @@ try {
   for (const name of ['update.sh', 'patches/fix-subagents-live-tools.mjs', 'patches/fix-subagents-live-tools.patch', 'tests/subagents-live-tools.mjs']) {
     mkdirSync(dirname(join(fakeRepo, name)), { recursive: true }); cpSync(join(repo, name), join(fakeRepo, name));
   }
+  // This fixture contains only subagents. Other suites are tested independently;
+  // keep their updater entry points present without requiring the whole install.
+  for (const name of ['compact-tools.mjs', 'orca-math.mjs']) {
+    writeFileSync(join(fakeRepo, 'tests', name), 'console.log("SKIP: outside isolated subagents fixture");\n');
+  }
   const pristine = join(temp, 'pristine'); cpSync(pkg, pristine, { recursive: true });
   const reverse = spawnSync(process.execPath, [join(repo, 'patches/fix-subagents-live-tools.mjs'), `--target=${pristine}`, '--revert'], { encoding: 'utf8' });
   assert.equal(reverse.status, 0, reverse.stderr);

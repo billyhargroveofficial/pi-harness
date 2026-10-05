@@ -6,5 +6,6 @@
   "pi-mcp-adapter": "5.0.0",
   "better-claude-code-ui": "0.1.8",
   "pi-statusline": "0.0.2",
-  "pi-openai-toolkit": "0.20.8"
+  "pi-openai-toolkit": "0.20.8",
+  "@fadouse/pi-math": "0.2.0"
 }

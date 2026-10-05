@@ -24,12 +24,14 @@ assert '/Users/billy' not in json.dumps(portable)
 previous = {'providers': {
     'deepseek': {'apiKey': '!machine-local-auth-helper', 'models': [{'id': 'old-model'}]},
     'openai-codex': {'apiKey': '!python3 /home/flyingkuskus/.pi/agent/bin/codex-access-token.py'},
+    'runpod-qwen-cyber': {'apiKey': '!machine-local-optional-provider'},
 }}
 merged = module.prepare(models, home, previous, preserve_auth=True)
 assert merged['providers']['deepseek']['apiKey'] == '!machine-local-auth-helper'
 assert merged['providers']['deepseek']['models'][0]['id'] == 'deepseek-flash'
 assert merged['providers']['openai-codex'] == previous['providers']['openai-codex']
-assert 'runpod-qwen-cyber' in merged['providers']
+assert merged['providers']['runpod-qwen-cyber'] == previous['providers']['runpod-qwen-cyber']
+assert 'runpod-qwen-cyber' not in models['providers'], 'obsolete Mac tunnel is not part of canonical config'
 assert models == original
 with tempfile.TemporaryDirectory() as temp:
     dst = Path(temp) / 'models.json'

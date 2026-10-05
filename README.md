@@ -17,8 +17,9 @@
 | `agent/agents/*.md` | `~/.pi/agent/agents/` — кастомные типы субагентов |
 | `agent/extensions/*.ts` | `~/.pi/agent/extensions/` — локальные UI-расширения, сохраняются при обновлении npm |
 | `tests/compact-tools.mjs` | проверка компактного рендера на установленном pi |
+| `tests/orca-math.mjs` | проверка Kitty-графики и реальных формул pi-math |
 | `tests/subagents-live-tools.mjs` | регрессии live tool calls workflow; `--live` — проверка на Codex |
-| `update.sh` | обновить npm-пакеты из апстрима, вернуть патчи и проверить live tool calls |
+| `update.sh` | обновить npm-пакеты из апстрима, вернуть патчи и проверить live tool calls и формулы |
 | `agent/themes/*.json` | `~/.pi/agent/themes/` — кастомные темы (`claude-code-light-hc`, `claude-green*`, `billy-aurora`) |
 | `ext/settings.json` | `~/.pi/settings.json` — конфиг расширений (см. ниже, почему не `agent/`) |
 | `assets/statusline.py` | `~/.local/share/claude-codex-statusline/statusline.py` — скрипт статус-строки (его же использует Claude Code) |
@@ -30,16 +31,16 @@ JSON-пути адаптируются к `$HOME`; существующие ко
 `models.json` сохраняются. `auth.json` и OAuth-токены не копируются.
 Конфиг `agent/extensions/pi-openai-toolkit/config.json` включает hosted web search
 для Codex. Установщик поднимает старые npm-пакеты до проверенного минимума из
-`assets/tested-package-versions.json`, не понижая более новые версии. На Linux нужен Python 3 и `pi` в PATH; приложения и туннели Mac не переносятся.
+`assets/tested-package-versions.json`, не понижая более новые версии. На Linux нужны Python 3, Node.js/npm, git и `pi` в PATH (у брата `~/.npm-global/bin`); приложения и туннели Mac не переносятся. Каталог навыков `~/.agents/skills`, MCP-конфиги и учётные данные остаются машинными; Orca-managed расширения создаёт сам Orca. Временные диагностические probe-расширения не входят в репозиторий.
 
 ## Стек
 
-Снимок локальной конфигурации: **4 октября 2026** (не заявление о последних версиях npm).
+Снимок конфигурации репозитория: **5 октября 2026** (не заявление о последних версиях npm).
 
 - **pi** 1.0.2
-- **провайдер/модель по умолчанию**: `openai-codex/gpt-6.1-sol`
-- **другие доступные модели**: `deepseek/deepseek-flash` и `runpod-qwen-cyber/qwen-cyber-bf16` через локальный туннель `127.0.0.1:18080`
-- **thinking**: `medium` по умолчанию; у DeepSeek уровни `medium`/`xhigh` скрыты (`thinkingLevelMap`)
+- **провайдер/модель по умолчанию**: `openai-codex/gpt-6-sol`, thinking `xhigh`
+- **другие доступные модели**: `deepseek/deepseek-flash`, `openai-codex/gpt-6.1-sol`, `openai-codex/gpt-6-astra` (medium); неиспользуемый RunPod-туннель убран из канонической конфигурации
+- **thinking**: у DeepSeek уровни `medium`/`xhigh` скрыты (`thinkingLevelMap`)
 - **compaction**: текущие локальные значения `reserveTokens: 1000`, `keepRecentTokens: 500`
 - **thinking-блоки скрыты**: видно `Thinking…` во время и `Thought for Ns` после, содержимое не рендерится (`hideThinkingBlock: true`)
 - **тема**: авто по системной теме macOS — светлая `claude-code-light-hc` / тёмная `claude-code-dark` (палитра Claude Code; в светлой приглушённые токены подтянуты до ≥4.5:1). Детект — `CSI ? 996 n` + подписка на mode 2031, Ghostty это отдаёт
@@ -47,7 +48,7 @@ JSON-пути адаптируются к `$HOME`; существующие ко
 - **TUI**: fullscreen
 - **компактный вывод тулов**: одна строка без stdout, диффов, картинок и стриминг-превью; `Ctrl+O` раскрывает обычный рендер, `/compact-tools off` возвращает старый вид. Мигающая точка сохраняет своё место — текст не дёргается. Дополнительной группировки одинаковых вызовов нет; после сообщений пользователя и ассистента добавляется пустая строка
 - **метрики**: TPS / TTFT / avg через `pi-live-throughput`
-- **формулы**: `$$ ... $$` рисуются юникод-текстом силами `pi-claude-code-ui` (картиночный `pi-math` с ним несовместим, снят)
+- **формулы**: `@fadouse/pi-math@0.2.0` рисует MathJax-картинки через Kitty внутри Orca; локальное расширение `orca-kitty-images.ts` передаёт Pi графические возможности Orca. Формулы слева: белые в тёмной теме и тёмные в светлой, цвет меняется вместе с темой. Дисплейные формулы в Orca ужимаются в одну строку, иначе построчная перерисовка стирает картинки. Старый `pi-claude-code-ui` с Unicode-конвертером отключён; активен совместимый `better-claude-code-ui`.
 
 ## Расширения
 
@@ -62,6 +63,8 @@ JSON-пути адаптируются к `$HOME`; существующие ко
 | `pi-deepseek-search` | 1.0.20 | Нативный веб-поиск DeepSeek как инструмент |
 | `pi-live-throughput` | 0.3.0 | TPS / avg TPS / TTFT / peak / input / cache read после каждого ответа |
 | `pi-openai-toolkit` | 0.20.8 | Инструменты интеграции OpenAI, добавлен в текущие настройки |
+| `@fadouse/pi-math` | 0.2.0 | Настоящие LaTeX-картинки внутри Orca (MathJax → Kitty); патчи для однострочного отображения в Orca и зависимости xmldom |
+| `orca-kitty-images.ts` | локальный | Безопасно распознаёт ORCA_IMAGE_PROTOCOL=kitty в Pi, сохраняет явный PI_IMAGE_PROTOCOL=none и блокирует tmux/screen |
 | `zzzz-compact-tools.ts` | локальный | Однострочные тулколы без вывода, штатное раскрытие, стабильная позиция мигающей точки |
 
 Конфиг расширений — `ext/settings.json` → `~/.pi/settings.json`. Важный нюанс: расширения семейства `pi-claude-code-ui` читают **не** `~/.pi/agent/settings.json`, а жёстко `$HOME/.pi/settings.json` и `$(pwd)/.pi/settings.json` (HOME-файл перекрывает проектный). Поэтому конфиг расширений живёт отдельным файлом и не смешивается с настройками pi.
@@ -87,6 +90,7 @@ cp ~/.pi/agent/settings.json    agent/settings.json      # и остальные
 cp ~/.pi/settings.json          ext/settings.json
 cp ~/.pi/agent/extensions/zzzz-compact-tools.ts agent/extensions/
 node tests/compact-tools.mjs
+node tests/orca-math.mjs
 # models.json не копировать вслепую: literal apiKey заменить командой из env-файла.
 git add agent ext docs tests patches README.md install.sh update.sh
 git commit -m "sync: <что поменялось>"
@@ -94,8 +98,8 @@ git commit -m "sync: <что поменялось>"
 
 Патчи применяются к апстрим-пакету, не требуют форка. Live-tools overlay проверяет все
 контексты до записи и отказывается править неизвестный изменённый код; см.
-[`docs/subagents-live-tools.md`](docs/subagents-live-tools.md). После патча — `/reload`.
+[`docs/subagents-live-tools.md`](docs/subagents-live-tools.md). Для включения картинок после установки **перезапусти Pi** (`/reload` может быть недостаточно: протокол фиксируется при старте).
 
 ## Приватность
 
-Ключи и OAuth-токены в репу не включаются; `auth.json` не отслеживается. DeepSeek читает ключ командой из `~/.config/deepseek.env`. RunPod — из `~/.config/runpod-qwen.env` (`RUNPOD_QWEN_API_KEY`); локальный literal-ключ при синхронизации заменён на эту команду, рабочий конфиг машины не меняется. Codex авторизуется через `/login`. В `.gitignore` закрыты `auth.json`, `models-store.json`, `sessions/`, `npm/`, `backups/`, `trust.json`.
+Ключи и OAuth-токены в репу не включаются; `auth.json` не отслеживается. DeepSeek читает ключ командой из `~/.config/deepseek.env`. Неиспользуемый RunPod-провайдер исключён из канонического конфига; установщик сохраняет дополнительные машинные провайдеры и их авторизацию. Codex авторизуется через `/login`. В `.gitignore` закрыты `auth.json`, `models-store.json`, `sessions/`, `npm/`, `backups/`, `trust.json`.

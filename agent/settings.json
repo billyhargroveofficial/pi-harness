@@ -10,13 +10,18 @@
     "npm:pi-mcp-adapter",
     "npm:better-claude-code-ui@0.1.8",
     "npm:pi-statusline",
-    "npm:pi-openai-toolkit"
+    "npm:pi-openai-toolkit",
+    "npm:@fadouse/pi-math@0.2.0"
   ],
   "lastChangelogVersion": "1.0.2",
   "theme": "claude-code-light-hc/claude-code-dark",
   "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-6.1-sol",
-  "defaultThinkingLevel": "medium",
+  "defaultModel": "gpt-6-sol",
+  "defaultThinkingLevel": "xhigh",
+  "modelThinkingLevels": {
+    "openai-codex/gpt-6-astra": "medium",
+    "openai-codex/gpt-6-sol": "xhigh"
+  },
   "hideThinkingBlock": true,
   "terminal": {
     "showImages": true
@@ -33,8 +38,9 @@
   },
   "enabledModels": [
     "deepseek/deepseek-flash",
-    "runpod-qwen-cyber/qwen-cyber-bf16",
-    "openai-codex/gpt-6.1-sol"
+    "openai-codex/gpt-6.1-sol",
+    "openai-codex/gpt-6-astra:medium",
+    "openai-codex/gpt-6-sol:xhigh"
   ],
   "skills": [
     "/Users/billy/.agents/skills"

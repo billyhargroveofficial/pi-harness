@@ -6,15 +6,51 @@
     }
   },
   "models": {
-    "openai-codex/gpt-6.1-sol": { "webSearch": { "route": "hosted" } },
-    "openai-codex/gpt-6-sol": { "webSearch": { "route": "hosted" } },
-    "openai-codex/gpt-6-luna": { "webSearch": { "route": "hosted" } },
-    "openai-codex/gpt-6-astra": { "webSearch": { "route": "hosted" } },
-    "openai-codex/gpt-5.6-sol": { "webSearch": { "route": "hosted" } },
-    "openai-codex/gpt-5.6-terra": { "webSearch": { "route": "hosted" } },
-    "openai-codex/gpt-5.6-luna": { "webSearch": { "route": "hosted" } },
-    "openai-codex/gpt-5.5": { "webSearch": { "route": "hosted" } },
-    "openai-codex/gpt-5.3-codex-spark": { "webSearch": { "route": "hosted" } }
+    "openai-codex/gpt-6.1-sol": {
+      "webSearch": {
+        "route": "hosted"
+      }
+    },
+    "openai-codex/gpt-6-sol": {
+      "webSearch": {
+        "route": "hosted"
+      }
+    },
+    "openai-codex/gpt-6-luna": {
+      "webSearch": {
+        "route": "hosted"
+      }
+    },
+    "openai-codex/gpt-6-astra": {
+      "webSearch": {
+        "route": "hosted"
+      }
+    },
+    "openai-codex/gpt-5.6-sol": {
+      "webSearch": {
+        "route": "hosted"
+      }
+    },
+    "openai-codex/gpt-5.6-terra": {
+      "webSearch": {
+        "route": "hosted"
+      }
+    },
+    "openai-codex/gpt-5.6-luna": {
+      "webSearch": {
+        "route": "hosted"
+      }
+    },
+    "openai-codex/gpt-5.5": {
+      "webSearch": {
+        "route": "hosted"
+      }
+    },
+    "openai-codex/gpt-5.3-codex-spark": {
+      "webSearch": {
+        "route": "hosted"
+      }
+    }
   },
   "diagnostics": {
     "level": "debug",

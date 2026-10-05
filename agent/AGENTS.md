@@ -2,7 +2,7 @@
 
 Отвечай по-русски, кратко и связно. Выполняй авторизованную задачу до проверенного результата.
 
-Используй нативный поиск DeepSeek для свежей информации и просьб найти или проверить; давай прямые ссылки на источники. Формулы записывай отдельными блоками $$ ... $$ — pi-claude-code-ui отрисовывает их юникод-текстом (картиночный pi-math несовместим с ним).
+Используй нативный поиск DeepSeek для свежей информации и просьб найти или проверить; давай прямые ссылки на источники. Формулы записывай отдельными блоками $$ ... $$ — pi-math рисует их картинками через Kitty-протокол в Orca; сохраняй исходный LaTeX для других терминалов.
 
 Для авторизованных сайтов и браузерных действий используй Playwriter с Chrome Shared; сначала прочитай ~/.agents/skills/playwriter/SKILL.md. Chrome Shared не оставляй висеть после работы: поднимай его по необходимости (~/.local/bin/chrome-shared-cdp start, при необходимости с --activate, чтобы показать окно) и после завершения задачи гаси (~/.local/bin/chrome-shared-cdp stop) — иначе он занимает 1–2 ГБ памяти.
 
@@ -17,3 +17,7 @@ Agent для отдельных задач и SubagentWorkflow для оркес
 
 Не устанавливай dynamic-workflow и watcher. Не отправляй внешние сообщения без
 прямой просьбы. Не записывай память без прямой просьбы.
+
+## Брат — хост `flyingkuskus`, его папка `/home/flyingkuskus`
+
+Машина брата — Arch Linux, хост `flyingkuskus`, пользователь `flyingkuskus`; его файлы и проекты лежат в `/home/flyingkuskus`. Он в своём tailnet `taileaee11.ts.net` (аккаунт `morphinethings@`), Mac Billy — в другом (`tail856bc0.ts.net`), поэтому прямой `ssh flyingkuskus@flyingkuskus.taileaee11.ts.net` по Tailscale висит на banner exchange. Рабочий проверенный путь — алиас `ssh brother` в `~/.ssh/config`: Tailscale Funnel TLS на :443 через `openssl s_client`, host key уже в `known_hosts`; `scp`/`sftp` через тот же алиас работают. Адрес внутри его tailnet — `100.92.120.101`; снаружи открыты Funnel `https://flyingkuskus.taileaee11.ts.net:8443` и `:10000`.
