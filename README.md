@@ -41,7 +41,7 @@ JSON-пути адаптируются к `$HOME`; существующие ко
 - **провайдер/модель по умолчанию**: `openai-codex/gpt-6-sol`, thinking `xhigh`
 - **другие доступные модели**: `deepseek/deepseek-flash`, `openai-codex/gpt-6.1-sol`, `openai-codex/gpt-6-astra` (medium); неиспользуемый RunPod-туннель убран из канонической конфигурации
 - **thinking**: у DeepSeek уровни `medium`/`xhigh` скрыты (`thinkingLevelMap`)
-- **compaction**: текущие локальные значения `reserveTokens: 1000`, `keepRecentTokens: 500`
+- **compaction**: для доступных GPT-моделей с окном 272k `reserveTokens: 27000` → порог авто-компактизации при превышении 245k; для остальных моделей `reserveTokens: 1000`. `keepRecentTokens: 500` остаётся общим
 - **thinking-блоки скрыты**: видно `Thinking…` во время и `Thought for Ns` после, содержимое не рендерится (`hideThinkingBlock: true`)
 - **тема**: авто по системной теме macOS — светлая `claude-code-light-hc` / тёмная `claude-code-dark` (палитра Claude Code; в светлой приглушённые токены подтянуты до ≥4.5:1). Детект — `CSI ? 996 n` + подписка на mode 2031, Ghostty это отдаёт
 - **статус-строка**: `pi-statusline` запускает тот же скрипт, что и Claude Code, с флагом `--no-quota` — папка, модель, размер контекста (`1M`), **реальный** уровень мышления и токены; квота Codex в pi не спрашивается

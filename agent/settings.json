@@ -34,7 +34,12 @@
   "compaction": {
     "enabled": true,
     "reserveTokens": 1000,
-    "keepRecentTokens": 500
+    "keepRecentTokens": 500,
+    "modelOverrides": {
+      "openai-codex/gpt-6-sol": { "reserveTokens": 27000 },
+      "openai-codex/gpt-6.1-sol": { "reserveTokens": 27000 },
+      "openai-codex/gpt-6-astra": { "reserveTokens": 27000 }
+    }
   },
   "enabledModels": [
     "deepseek/deepseek-flash",

@@ -19,6 +19,10 @@ if subagents.get('scopeModels'):
     assert all(':' not in entry for entry in settings['enabledModels']), 'pi-subagents scopeModels ignores :thinking suffixes'
     assert 'openai-codex/gpt-6-sol' in settings['enabledModels']
     assert settings['modelThinkingLevels']['openai-codex/gpt-6-sol'] == 'xhigh'
+for model in ('openai-codex/gpt-6-sol', 'openai-codex/gpt-6.1-sol', 'openai-codex/gpt-6-astra'):
+    assert model in settings['enabledModels']
+    assert 272000 - settings['compaction']['modelOverrides'][model]['reserveTokens'] == 245000
+assert settings['compaction']['reserveTokens'] == 1000, 'keep the DeepSeek/default threshold unchanged'
 models = json.loads((root / 'agent/models.json').read_text())
 original = copy.deepcopy(models)
 home = Path('/home/flyingkuskus')
