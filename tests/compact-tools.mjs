@@ -111,6 +111,20 @@ const userAssistant = new tui.Container(); userAssistant.addChild(user); userAss
 assert.deepEqual(userAssistant.render(100).map(line => line.trimEnd()), ['Юзер.', '', 'Ответ.']);
 const existing = new tui.Container(); existing.addChild(user); existing.addChild(new tui.Spacer(1)); existing.addChild(reads[1]);
 assert.equal(existing.render(100).length, 3, 'do not double an existing spacer');
+// Real user bubbles have one padded line *inside their background*. It is
+// visually attached to the next tool unless we add a separate external row.
+const actualUser = new host.UserMessageComponent('Там точная настройка как у нас щас?');
+const realUserRows = actualUser.render(100);
+assert.ok(realUserRows.length > 1 && !realUserRows.at(-1).replace(/\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').trim());
+const realTranscript = new tui.Container(); realTranscript.addChild(actualUser); realTranscript.addChild(reads[2]);
+assert.equal(realTranscript.render(100)[realUserRows.length], '', 'external gap after padded real user bubble');
+const realWithSpacer = new tui.Container(); realWithSpacer.addChild(actualUser); realWithSpacer.addChild(new tui.Spacer(1)); realWithSpacer.addChild(reads[2]);
+assert.equal(realWithSpacer.render(100).length, realUserRows.length + 2, 'no duplicate when external spacer already exists');
+const realWithInvisibleMember = new tui.Container(); realWithInvisibleMember.addChild(actualUser);
+realWithInvisibleMember.addChild({ render: () => [], invalidate() {} }); realWithInvisibleMember.addChild(reads[2]);
+assert.equal(realWithInvisibleMember.render(100)[realUserRows.length], '', 'invisible components cannot swallow the gap');
+const realUserThinking = new tui.Container(); realUserThinking.addChild(actualUser); realUserThinking.addChild(new tui.Text('Thinking for 1s…', 0, 0));
+assert.equal(realUserThinking.render(100)[realUserRows.length], '', 'thinking gets the same gap');
 const clicked = transcript.render(100);
 const clickY = clicked.findIndex(line => line.includes('Read('));
 assert.equal(transcript.handleMouse({ x: 0, y: clickY, originX: 0, originY: 0, width: 100, height: clicked.length, type: 'click', button: 'left' }).handled, true);

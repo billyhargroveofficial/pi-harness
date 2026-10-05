@@ -4,7 +4,8 @@ import { Container, truncateToWidth } from "@earendil-works/pi-tui";
 
 const PATCH = Symbol.for("billy:compact-tool-rows:v2");
 const LEGACY = Symbol.for("billy:compact-tool-rows:v1");
-const SPACING = Symbol.for("billy:message-tool-spacing:v1");
+// v2 replaces the old spacing wrapper on /reload as well as on fresh start.
+const SPACING = Symbol.for("billy:message-tool-spacing:v2");
 const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 const plain = (text: string) => text.replace(ANSI, "");
 
@@ -21,17 +22,27 @@ function installMessageSpacing() {
 		const lines: string[] = [];
 		const mouseChildren: any[] = [];
 		let previousVisible: any;
+		let externalBlankSinceMessage = false;
 		for (const child of this.children) {
 			const rows: string[] = child.render(width);
 			const visible = rows.some(row => plain(row).trim());
 			const afterMessage = previousVisible instanceof AssistantMessageComponent || previousVisible instanceof UserMessageComponent;
-			if (visible && afterMessage && rows.length && plain(rows[0]).trim() && lines.length && plain(lines[lines.length - 1]).trim()) {
+			// UserMessageComponent pads its own colored background below the text.
+			// That blank-looking row is INSIDE the gray bubble, not a gap after it.
+			// Only an actual spacer between components can satisfy that gap.
+			const needsGap = previousVisible instanceof UserMessageComponent || (lines.length > 0 && plain(lines[lines.length - 1]).trim());
+			if (visible && afterMessage && rows.length && plain(rows[0]).trim() && !externalBlankSinceMessage && needsGap) {
 				lines.push("");
 				mouseChildren.push({ component: { render: () => [""], invalidate() {} }, height: 1 });
 			}
 			lines.push(...rows.map(row => width > 0 ? truncateToWidth(row, width, "…") : ""));
 			mouseChildren.push({ component: child, height: rows.length });
-			if (visible) previousVisible = child;
+			if (visible) {
+				previousVisible = child;
+				externalBlankSinceMessage = false;
+			} else if (rows.length > 0) {
+				externalBlankSinceMessage = true;
+			}
 		}
 		this.mouseLayout = { width, children: mouseChildren };
 		return lines;
