@@ -57,7 +57,9 @@ with tempfile.TemporaryDirectory() as temp:
     assert plain(statusline.render(data, {}, show_quota=False)).endswith(' · ' + 'N' * 60 + '…')
 
     data['pi']['session_file'] = str(session.with_name('missing.jsonl'))
-    assert plain(statusline.render(data, {}, show_quota=False)) == expected.split(' · ')[0]
+    missing = plain(statusline.render(data, {}, show_quota=False))
+    assert missing.startswith('📁 harness-space ● GPT-6 Sol 272k ')
+    assert missing.endswith(' 221k') and ' · ' not in missing
 
 patch = (root / 'patches/fix-pi-statusline-refresh.mjs').read_text()
 assert 'pi.on("session_info_changed"' in patch, 'missing rename refresh hook'

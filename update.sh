@@ -35,4 +35,5 @@ PI_CODING_AGENT_DIR="$AGENT_DIR" node "$REPO_DIR/tests/compact-tools.mjs"
 PI_CODING_AGENT_DIR="$AGENT_DIR" node "$REPO_DIR/tests/subagents-live-tools.mjs"
 PI_CODING_AGENT_DIR="$AGENT_DIR" node "$REPO_DIR/tests/orca-math.mjs"
 python3 "$REPO_DIR/tests/statusline-session-name.py"
+node "$REPO_DIR/tests/session-manager-hide-subagents.mjs"
 echo 'Packages updated and overlays verified. Restart pi to enable Orca Kitty images (not just /reload).'
