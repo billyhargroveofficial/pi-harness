@@ -1,6 +1,6 @@
 // Offline patch + behavior regression for @vanillagreen/pi-session-manager.
 import assert from 'node:assert/strict';
-import { closeSync, mkdtempSync, openSync, readFileSync, readSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -74,5 +74,16 @@ try {
   const drift = readFileSync(sourcePath, 'utf8');
   result = run(); assert.notEqual(result.status, 0);
   assert.equal(readFileSync(sourcePath, 'utf8'), drift);
-  console.log('PASS: /sessions hides persisted subagents but keeps human forks, renamed/main sessions, Current/All, custom directory; idempotent/drift-safe');
+  // A machine without the optional package must still be able to run install/update.
+  const emptyHome = join(temp, 'empty-home'); mkdirSync(emptyHome);
+  const optional = spawnSync(process.execPath, [patch], { env: { ...process.env, HOME: emptyHome }, encoding: 'utf8' });
+  assert.equal(optional.status, 0, optional.stderr);
+  assert.match(optional.stdout, /пропуск: pi-session-manager не установлен/);
+  const packageManifest = join(emptyHome, '.pi/agent/npm/node_modules/@vanillagreen/pi-session-manager/package.json');
+  mkdirSync(dirname(packageManifest), { recursive: true }); writeFileSync(packageManifest, '{}');
+  const installedButChanged = spawnSync(process.execPath, [patch], { env: { ...process.env, HOME: emptyHome }, encoding: 'utf8' });
+  assert.notEqual(installedButChanged.status, 0, 'installed package with missing actions.ts must fail');
+  const explicitMissing = spawnSync(process.execPath, [patch, `--target=${join(temp, 'missing.ts')}`], { encoding: 'utf8' });
+  assert.notEqual(explicitMissing.status, 0);
+  console.log('PASS: /sessions hides subagents, keeps human forks, Current/All, custom dir; optional package skip, idempotent/drift-safe');
 } finally { rmSync(temp, { recursive: true, force: true }); }

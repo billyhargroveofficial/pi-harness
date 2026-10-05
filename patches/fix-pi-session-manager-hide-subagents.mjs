@@ -2,13 +2,15 @@
 /**
  * Hide pi-subagents' persisted child sessions from /sessions, without changing
  * the files or Pi's /resume. Ordinary user forks/branches remain visible.
- * Run after pi update; --target=<actions.ts> is for offline regression tests.
+ * Run after pi update; skip if the optional package isn't installed.
+ * --target=<actions.ts> is for offline regression tests (missing target fails).
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
-const defaultTarget = join(homedir(), ".pi/agent/npm/node_modules/@vanillagreen/pi-session-manager/extensions/actions.ts");
+const packageDir = join(homedir(), ".pi/agent/npm/node_modules/@vanillagreen/pi-session-manager");
+const defaultTarget = join(packageDir, "extensions/actions.ts");
 const targetArg = process.argv.slice(2).find((arg) => arg.startsWith("--target="));
 const target = targetArg ? resolve(targetArg.slice("--target=".length)) : defaultTarget;
 const marker = "// pi-harness: hide persisted subagent sessions only in /sessions";
@@ -65,6 +67,10 @@ let source;
 try {
 	source = readFileSync(target, "utf8");
 } catch (error) {
+	if (!targetArg && error.code === "ENOENT" && !existsSync(join(packageDir, "package.json"))) {
+		console.log("пропуск: pi-session-manager не установлен");
+		process.exit(0);
+	}
 	console.error(`не прочитать ${target}: ${error.message}`);
 	process.exit(1);
 }
