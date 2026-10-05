@@ -12,7 +12,15 @@ pi update "$@"
 mkdir -p "$AGENT_DIR/patches"
 for f in "$REPO_DIR"/patches/*.mjs "$REPO_DIR"/patches/*.patch; do
   [ -e "$f" ] || continue
-  cp -p "$f" "$AGENT_DIR/patches/$(basename "$f")"
+  dst="$AGENT_DIR/patches/$(basename "$f")"
+  # Older installs may have symlinks back to this repo. `cp source symlink`
+  # fails when both paths resolve to the same file. Replace links with real
+  # copies; skip already-identical regular files.
+  if [ -L "$dst" ] || [ ! -e "$dst" ] || ! cmp -s "$f" "$dst"; then
+    tmp="$(mktemp "$AGENT_DIR/patches/.patch.XXXXXXXX")"
+    cp -p "$f" "$tmp"
+    mv -f "$tmp" "$dst"
+  fi
 done
 failed=0
 for f in "$REPO_DIR"/patches/*.mjs; do

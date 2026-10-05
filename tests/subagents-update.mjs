@@ -1,6 +1,6 @@
 // Exercise update.sh with a fake pi command and an isolated package/config directory.
 import assert from 'node:assert/strict';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync, lstatSync, symlinkSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,9 +37,22 @@ fs.cpSync(process.env.MOCK_PRISTINE, process.env.MOCK_TARGET, { recursive: true 
   assert.deepEqual(JSON.parse(readFileSync(env.MOCK_LOG, 'utf8')), ['update', '--extensions']);
   assert.ok(existsSync(join(agent, 'patches/fix-subagents-live-tools.patch')));
   assert.match(normal.stdout, /PASS: live tools/);
+  // Regression: a previous install left a patch symlink pointing at the repo.
+  // `cp` used to abort with "source and destination are identical" here.
+  const patchName = 'fix-subagents-live-tools.mjs';
+  const sourcePatch = join(fakeRepo, 'patches', patchName);
+  const installedPatch = join(agent, 'patches', patchName);
+  rmSync(installedPatch);
+  symlinkSync(sourcePatch, installedPatch);
+  const originalPatch = readFileSync(sourcePatch, 'utf8');
   const all = update('--all');
   assert.equal(all.status, 0, all.stdout + all.stderr);
   assert.deepEqual(JSON.parse(readFileSync(env.MOCK_LOG, 'utf8')), ['update', '--all']);
+  assert.equal(lstatSync(installedPatch).isSymbolicLink(), false, 'replace old link with independent copy');
+  assert.equal(readFileSync(installedPatch, 'utf8'), originalPatch);
+  assert.equal(readFileSync(sourcePatch, 'utf8'), originalPatch, 'never overwrite repo patch');
+  const repeated = update();
+  assert.equal(repeated.status, 0, repeated.stdout + repeated.stderr);
   // Incompatible upstream is installed normally, but no partial overlay is written.
   const ui = join(pristine, 'src/ui/workflow-dialog.ts');
   writeFileSync(ui, readFileSync(ui, 'utf8').replace('function activityBody(', 'function changedUpstreamActivity('));
