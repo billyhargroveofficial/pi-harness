@@ -1,17 +1,9 @@
 #!/usr/bin/env node
 /**
- * Патч pi-statusline: строка не обновляется при смене уровня thinking.
- *
- * Наш статус-лайн печатает живой уровень мышления (из сессии pi), но расширение
- * перерисовывает футер только на session_start / turn_end / model_select /
- * session_compact / tree / switch / fork. pi отдельно шлёт
- * `thinking_level_select` («Fired when the thinking level changes… built-in
- * thinking-level controls change the active thinking level») — его никто не
- * слушает, поэтому после shift+tab уровень в строке остаётся старым до конца
- * следующего хода.
- *
- * Патч: подписка на событие и тот же дебаунс-рефреш, что у model_select.
- * Идемпотентен.
+ * Патч pi-statusline: немедленный рефреш при смене уровня мышления
+ * (thinking_level_select) и имени текущей сессии (session_info_changed).
+ * Оба события используют штатный debounced scheduleRefresh(); остальные
+ * механизмы рендера и payload расширения не меняются. Идемпотентен.
  * Запуск: node ~/.pi/agent/patches/fix-pi-statusline-refresh.mjs
  */
 import { readFileSync, writeFileSync } from "node:fs";
@@ -20,21 +12,42 @@ import { join } from "node:path";
 
 const target = join(homedir(), ".pi/agent/npm/node_modules/pi-statusline/src/index.ts");
 
-const MARKER = 'pi.on("thinking_level_select"';
-const ORIGINAL = `  pi.on("model_select", async (_event, ctx) => {
+const operations = [
+	{
+		marker: 'pi.on("thinking_level_select"',
+		anchor: `  pi.on("model_select", async (_event, ctx) => {
     scheduleRefresh(ctx);
   });
-`;
-const PATCHED = `  pi.on("model_select", async (_event, ctx) => {
+`,
+		replacement: `  pi.on("model_select", async (_event, ctx) => {
     scheduleRefresh(ctx);
   });
 
-  // pi fires this on shift+tab / pi.setThinkingLevel(); the command line prints
-  // the live level, so it has to be re-run when the level changes.
+  // pi fires this on shift+tab / pi.setThinkingLevel().
   pi.on("thinking_level_select", async (_event, ctx) => {
     scheduleRefresh(ctx);
   });
-`;
+`,
+		label: "thinking_level_select",
+	},
+	{
+		marker: 'pi.on("session_info_changed"',
+		anchor: `  pi.on("session_start", async (_event, ctx) => {
+    scheduleRefresh(ctx);
+  });
+`,
+		replacement: `  pi.on("session_start", async (_event, ctx) => {
+    scheduleRefresh(ctx);
+  });
+
+  // /name updates session_info without starting a model turn.
+  pi.on("session_info_changed", async (_event, ctx) => {
+    scheduleRefresh(ctx);
+  });
+`,
+		label: "session_info_changed",
+	},
+];
 
 let source;
 try {
@@ -44,15 +57,19 @@ try {
 	process.exit(1);
 }
 
-if (source.includes(MARKER)) {
-	console.log("уже пропатчено: refresh on thinking_level_select");
-} else if (!source.includes(ORIGINAL)) {
-	console.error(
-		`НЕ найден исходный блок (ожидался обработчик model_select) — апстрим изменился, патч нужно переписать вручную:\n  ${target}`,
-	);
-	process.exit(1);
+const changed = [];
+for (const operation of operations) {
+	if (source.includes(operation.marker)) continue;
+	if (!source.includes(operation.anchor)) {
+		console.error(`НЕ найден блок для ${operation.label} — апстрим изменился, патч требует проверки:\n  ${target}`);
+		process.exit(1); // Проверяем все блоки до записи: не оставляем полупатч.
+	}
+	source = source.replace(operation.anchor, operation.replacement);
+	changed.push(operation.label);
+}
+if (changed.length) {
+	writeFileSync(target, source);
+	console.log(`пропатчено: refresh on ${changed.join(", ")}`);
 } else {
-	writeFileSync(target, source.replace(ORIGINAL, PATCHED));
-	console.log("пропатчено: refresh on thinking_level_select");
-	console.log("файл записан:", target);
+	console.log("уже пропатчено: thinking_level_select, session_info_changed");
 }

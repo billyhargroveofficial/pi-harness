@@ -18,6 +18,7 @@ try {
   for (const name of ['compact-tools.mjs', 'orca-math.mjs']) {
     writeFileSync(join(fakeRepo, 'tests', name), 'console.log("SKIP: outside isolated subagents fixture");\n');
   }
+  writeFileSync(join(fakeRepo, 'tests/statusline-session-name.py'), 'print("SKIP: outside isolated subagents fixture")\n');
   const pristine = join(temp, 'pristine'); cpSync(pkg, pristine, { recursive: true });
   const reverse = spawnSync(process.execPath, [join(repo, 'patches/fix-subagents-live-tools.mjs'), `--target=${pristine}`, '--revert'], { encoding: 'utf8' });
   assert.equal(reverse.status, 0, reverse.stderr);

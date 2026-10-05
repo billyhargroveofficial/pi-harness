@@ -4,6 +4,7 @@ import datetime
 import fcntl
 import json
 import math
+import mmap
 import os
 from pathlib import Path
 import queue
@@ -177,6 +178,42 @@ def pi_thinking_level(data):
     return level
 
 
+def pi_session_name(data):
+    """Последнее имя сессии из JSONL, даже если /name был далеко от хвоста.
+
+    mmap ищет короткий маркер с конца файла: не парсим многомегабайтную
+    переписку и не теряем имя, когда после переименования прошло много ходов.
+    Пустая последняя запись session_info означает сброшенное имя.
+    """
+    session = ((data.get('pi') or {}).get('session_file')) or ''
+    if not isinstance(session, str) or not session:
+        return None
+    marker = b'"type":"session_info"'
+    try:
+        with open(session, 'rb') as handle:
+            with mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as entries:
+                position = len(entries)
+                while True:
+                    position = entries.rfind(marker, 0, position)
+                    if position < 0:
+                        return None
+                    start = entries.rfind(b'\n', 0, position) + 1
+                    end = entries.find(b'\n', position)
+                    if end < 0:
+                        end = len(entries)
+                    try:
+                        entry = json.loads(entries[start:end])
+                    except ValueError:
+                        position = start
+                        continue
+                    if entry.get('type') == 'session_info':
+                        value = entry.get('name')
+                        return value.strip() if isinstance(value, str) and value.strip() else None
+                    position = start
+    except (OSError, ValueError):
+        return None
+
+
 def render(data, quota, now=None, show_quota=True):
     now = time.time() if now is None else now
     cwd = (data.get('workspace') or {}).get('current_dir') or data.get('cwd') or os.getcwd()
@@ -208,6 +245,12 @@ def render(data, quota, now=None, show_quota=True):
         tokens = size * context['used_percentage'] / 100
     ctx = f'{int(tokens / 1000 + 0.5)}k' if tokens is not None else '—k'
     model_part = f'{name} {format_size(size)} {effort} {ctx}'
+    if pi_payload:
+        session_name = pi_session_name(data)
+        if session_name:
+            title = clean(session_name)
+            if title:
+                model_part += ' · ' + (title[:60] + '…' if len(title) > 60 else title)
     used, reset = quota.get('used_percent'), quota.get('resets_at', 0)
     stale = bool(quota.get('error')) or now - quota.get('checked_at', 0) > 180
     if not show_quota:

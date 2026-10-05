@@ -29,7 +29,8 @@ Verified: live weekly RPC (45% used), weekly-versus-five-hour/Spark filtering, c
 - **Уровень мышления** берётся из сессии pi: `pi.session_file` → последняя запись `thinking_level_change` (`thinkingLevel`). Для свежей сессии дефолт из `~/.pi/agent/settings.json` (`defaultThinkingLevel`). Только если ничего из этого нет — падает в `effort.level` нагрузки и настройки Claude Code.
   Записи уровня лежат и в начале файла сессии (старт), и в хвосте (переключения), поэтому читаются и голова (64 КБ), и хвост (256 КБ).
 - **Размер контекста** печатается как `1M` при ≥ 1 000 000 (было `1000k`).
-- Живое обновление уровня после `shift+tab` обеспечивает патч `patches/fix-pi-statusline-refresh.mjs`
-  (pi-statusline не слушал событие `thinking_level_select` и перерисовывался только на границе хода).
+- **Имя сессии** после `·` берётся из последней записи `session_info` в `pi.session_file`; после `/name` обновляется, при очистке исчезает. Поиск с конца через `mmap` находит имя и в старой части большой сессии. Только для pi: Claude Code отображается по-прежнему.
+- Живое обновление после `shift+tab` и `/name` обеспечивает патч `patches/fix-pi-statusline-refresh.mjs`
+  (события `thinking_level_select` и `session_info_changed`). Для уже открытого pi после установки патча нужен `/reload`.
 
-Пример строки в pi: `📁 billy ● DeepSeek V4.1 Flash 1M max 331k`
+Пример строки в pi: `📁 harness-space ● GPT-6 Sol 272k xhigh 221k · pi-patches`
