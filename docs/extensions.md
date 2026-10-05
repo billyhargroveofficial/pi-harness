@@ -2,8 +2,8 @@
 
 **Актуальный набор (5 октября 2026):** `better-claude-code-ui@0.1.8` (рендер тулов в стиле CC, из него же тема), `@fadouse/pi-math@0.2.0` (MathJax-картинки),
 `pi-statusline` (статус-строка = тот же скрипт, что в Claude Code — см. [`statusline.md`](statusline.md)),
-`@tintinweb/pi-subagents`, `pi-deepseek-search`, `pi-live-throughput`, `pi-mcp-adapter`, `pi-openai-toolkit`
-и локальный `zzzz-compact-tools.ts`. Разделы ниже — по пакетам;
+`@tintinweb/pi-subagents`, `pi-deepseek-search`, `pi-live-throughput`, `pi-mcp-adapter`, `pi-openai-toolkit`,
+`@vanillagreen/pi-session-manager@2.0.4` и локальный `zzzz-compact-tools.ts`. Разделы ниже — по пакетам;
 `pi-claude-code-ui` оставлен установленным, но **отключён** (`"extensions": []`), его место занял форк.
 
 ## better-claude-code-ui (0.1.8)
@@ -39,6 +39,20 @@ Shiki-диффы, группировка вызовов), но без двух �
 
 Добавлен в локальный `agent/settings.json`. Конфиги авторизации и данные запросов в репу не копируются.
 Встроенный MCP отключён через `extensions: ["-builtin:mcp"]`, остаётся установленный `pi-mcp-adapter`.
+
+## @vanillagreen/pi-session-manager (2.0.4)
+
+Отдельный браузер сессий `/sessions` (или `F1` после перезапуска Pi). `Tab` переключает Current/All;
+All вызывает `SessionManager.listAll()` и читает сессии всех рабочих папок из стандартного
+`~/.pi/agent/sessions/`. Проверено на изолированном HOME с двумя разными cwd: Current показал одну,
+All — обе. Не заменяет штатный `/resume`: там `Tab` тоже переключает область поиска.
+
+В обоих интерфейсах видны сохранённые дочерние сессии `@tintinweb/pi-subagents`. Установленный
+менеджер не имеет фильтра «скрыть субагентов», а `Ctrl+N`/`Alt+N` фильтрует только *неименованные*
+сессии — текущие субагенты имеют имена `Explore#…` и `general-purpose#…`, поэтому остаются видны.
+`rememberAgents: false` в `agent/subagents.json` предотвратит появление **новых** дочерних сессий,
+но отключит их долговременное возобновление по `@handle`; существующие сессии никуда не денутся.
+Пока этот параметр не меняем и историю не удаляем.
 
 ## pi-statusline (0.0.2)
 

@@ -11,7 +11,8 @@
     "npm:better-claude-code-ui@0.1.8",
     "npm:pi-statusline",
     "npm:pi-openai-toolkit",
-    "npm:@fadouse/pi-math@0.2.0"
+    "npm:@fadouse/pi-math@0.2.0",
+    "npm:@vanillagreen/pi-session-manager@2.0.4"
   ],
   "lastChangelogVersion": "1.0.2",
   "theme": "claude-code-light-hc/claude-code-dark",
