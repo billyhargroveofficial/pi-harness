@@ -53,10 +53,9 @@
     }
   },
   "diagnostics": {
-    "level": "debug",
+    "level": "info",
     "notifyOnLoad": false,
-    "captureRequests": true,
-    "captureResponses": true,
-    "artifactRoot": "/tmp/pi-toolkit-artifacts"
+    "captureRequests": false,
+    "captureResponses": false
   }
 }
