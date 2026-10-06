@@ -47,7 +47,7 @@ JSON-пути адаптируются к `$HOME`; существующие ко
 - **статус-строка**: `pi-statusline` запускает тот же скрипт, что и Claude Code, с флагом `--no-quota` — папка, модель, размер контекста (`1M`), **реальный** уровень мышления, токены и `· имя сессии` (только pi); квота Codex в pi не спрашивается
 - **TUI**: fullscreen
 - **компактный вывод тулов**: одна строка без stdout, диффов, картинок и стриминг-превью; `Ctrl+O` раскрывает обычный рендер, `/compact-tools off` возвращает старый вид. Мигающая точка сохраняет своё место — текст не дёргается. Дополнительной группировки одинаковых вызовов нет; после сообщений пользователя и ассистента добавляется пустая строка
-- **метрики**: TPS / TTFT / avg через `pi-live-throughput`
+- **метрики**: `momentum` (текущий TPS), `cumulative` (накопленная по модели), `cache hit` и общий `session input` в нижнем статусбаре через `pi-live-throughput` с Codex-патчем: hidden reasoning вычитается, скорость сохраняется между deltas
 - **сессии**: `/sessions` от `@vanillagreen/pi-session-manager` открывает Current/All (`Tab`) и скрывает сохранённые сессии субагентов, оставляя обычные форки/ветки. Патч `fix-pi-session-manager-hide-subagents` не меняет штатный `/resume`, файлы сессий и возобновление субагентов по `@handle`.
 - **формулы**: `@fadouse/pi-math@0.2.0` рисует MathJax-картинки через Kitty внутри Orca; локальное расширение `orca-kitty-images.ts` передаёт Pi графические возможности Orca. Формулы слева: белые в тёмной теме и тёмные в светлой, цвет меняется вместе с темой. Дисплейные формулы в Orca ужимаются в одну строку, иначе построчная перерисовка стирает картинки. Старый `pi-claude-code-ui` с Unicode-конвертером отключён; активен совместимый `better-claude-code-ui`.
 
@@ -62,7 +62,7 @@ JSON-пути адаптируются к `$HOME`; существующие ко
 | `pi-mcp-adapter` | 5.0.0 | MCP-серверы в pi (notion, telegram) |
 | `@tintinweb/pi-subagents` | 0.19.0 проверена; npm без version pin | Субагенты и workflow-оркестрация; патчи `fix-subagents-typebox-peers` и `fix-subagents-live-tools` (live Activity) |
 | `pi-deepseek-search` | 1.0.20 | Нативный веб-поиск DeepSeek как инструмент |
-| `pi-live-throughput` | 0.3.0 | TPS / avg TPS / TTFT / peak / input / cache read после каждого ответа |
+| `pi-live-throughput` | 0.3.0 | Нижний футер: `momentum`, `cumulative`, cache hit %, session input; native TPS без hidden reasoning, последнее текущее значение сохраняется |
 | `pi-openai-toolkit` | 0.20.8 | Инструменты интеграции OpenAI, добавлен в текущие настройки |
 | `@vanillagreen/pi-session-manager` | 2.0.4 | Менеджер `/sessions`: поиск, Current/All, возобновление, переименование и удаление; патч скрывает субагентов только в этом списке |
 | `@fadouse/pi-math` | 0.2.0 | Настоящие LaTeX-картинки внутри Orca (MathJax → Kitty); патчи для однострочного отображения в Orca и зависимости xmldom |
@@ -73,6 +73,7 @@ JSON-пути адаптируются к `$HOME`; существующие ко
 
 Подробности по каждому решению — в `docs/`:
 
+- [`docs/codex-throughput.md`](docs/codex-throughput.md) — расчёт Codex TPS, hidden reasoning, нижний футер, cache hit %, session input, offline replay
 - [`docs/extensions.md`](docs/extensions.md) — что за расширения, какие у них настройки и что у них мертво
 - [`docs/statusline.md`](docs/statusline.md) — статус-строка: `pi-statusline` + тот же скрипт (без квоты Codex, реальный уровень мышления)
 - [`docs/light-theme.md`](docs/light-theme.md) — авто light/dark, светлая тема и патчи к cc-ui (две итерации)
@@ -98,7 +99,9 @@ git add agent ext docs tests patches README.md install.sh update.sh
 git commit -m "sync: <что поменялось>"
 ```
 
-Патчи применяются к апстрим-пакету, не требуют форка. Live-tools overlay проверяет все
+Патчи применяются к апстрим-пакету, не требуют форка. Codex TPS overlay хранит
+свои TypeScript-исходники в `patches/pi-live-throughput/`; они копируются
+установщиком и обновлением вместе с `fix-pi-live-throughput-codex.mjs` и `fix-pi-statusline-throughput.mjs`. Live-tools overlay проверяет все
 контексты до записи и отказывается править неизвестный изменённый код; см.
 [`docs/subagents-live-tools.md`](docs/subagents-live-tools.md). Для включения картинок после установки **перезапусти Pi** (`/reload` может быть недостаточно: протокол фиксируется при старте).
 

@@ -62,8 +62,11 @@
 
 ## Что не мешает
 
-- `pi-live-throughput` пишет метрики через `setWidget` (строка над редактором); его режим `/throughput status` (в футер)
-  при кастомном футере не виден — так было и раньше.
+- `pi-live-throughput` по умолчанию пишет четыре коротких поля через `setStatus`.
+  Патч `fix-pi-statusline-throughput.mjs` добавляет их в этот же нижний футер через `●`,
+  обновляет из FooterDataProvider при рендере и переносит поля в узких панелях.
+  Общий `session input` восстанавливается по usage всей сессии; текущие `18k` в базовой
+  строке остаются размером текущего контекста. См. [codex-throughput.md](codex-throughput.md).
 - Квота Codex из pi не запрашивается вовсе (флаг `--no-quota` отключает и фоновый `codex app-server` RPC).
 - Оба патча идемпотентны и применяются `install.sh`; после `pi update` — заново
   (`node ~/.pi/agent/patches/fix-pi-statusline-refresh.mjs`).

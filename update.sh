@@ -22,6 +22,17 @@ for f in "$REPO_DIR"/patches/*.mjs "$REPO_DIR"/patches/*.patch; do
     mv -f "$tmp" "$dst"
   fi
 done
+# Source payload for the Codex throughput overlay; copied with the patch.
+mkdir -p "$AGENT_DIR/patches/pi-live-throughput"
+for f in "$REPO_DIR"/patches/pi-live-throughput/*.ts; do
+  [ -e "$f" ] || continue
+  dst="$AGENT_DIR/patches/pi-live-throughput/$(basename "$f")"
+  if [ -L "$dst" ] || [ ! -e "$dst" ] || ! cmp -s "$f" "$dst"; then
+    tmp="$(mktemp "$AGENT_DIR/patches/pi-live-throughput/.source.XXXXXXXX")"
+    cp -p "$f" "$tmp"
+    mv -f "$tmp" "$dst"
+  fi
+done
 failed=0
 for f in "$REPO_DIR"/patches/*.mjs; do
   [ -e "$f" ] || continue
@@ -36,4 +47,6 @@ PI_CODING_AGENT_DIR="$AGENT_DIR" node "$REPO_DIR/tests/subagents-live-tools.mjs"
 PI_CODING_AGENT_DIR="$AGENT_DIR" node "$REPO_DIR/tests/orca-math.mjs"
 python3 "$REPO_DIR/tests/statusline-session-name.py"
 node "$REPO_DIR/tests/session-manager-hide-subagents.mjs"
+node "$REPO_DIR/tests/codex-throughput.mjs"
+node "$REPO_DIR/tests/codex-throughput-extension.mjs"
 echo 'Packages updated and overlays verified. Restart pi to enable Orca Kitty images (not just /reload).'

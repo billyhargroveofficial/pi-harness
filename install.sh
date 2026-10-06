@@ -141,6 +141,17 @@ for f in "$REPO_DIR"/patches/*.mjs "$REPO_DIR"/patches/*.patch; do
     echo "  + $dst"
   fi
 done
+# Source payload for the Codex throughput overlay; copied with the patch.
+mkdir -p "$AGENT_DIR/patches/pi-live-throughput"
+for f in "$REPO_DIR"/patches/pi-live-throughput/*.ts; do
+  [ -e "$f" ] || continue
+  dst="$AGENT_DIR/patches/pi-live-throughput/$(basename "$f")"
+  if [ -L "$dst" ] || [ ! -e "$dst" ] || ! cmp -s "$f" "$dst"; then
+    tmp="$(mktemp "$AGENT_DIR/patches/pi-live-throughput/.source.XXXXXXXX")"
+    cp -p "$f" "$tmp"
+    mv -f "$tmp" "$dst"
+  fi
+done
 for f in "$REPO_DIR"/patches/*.mjs; do
   [ -e "$f" ] || continue
   echo "  $(basename "$f")"
