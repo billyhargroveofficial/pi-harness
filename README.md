@@ -35,11 +35,11 @@ JSON-пути адаптируются к `$HOME`; существующие ко
 
 ## Стек
 
-Снимок конфигурации репозитория: **5 октября 2026** (не заявление о последних версиях npm).
+Снимок конфигурации репозитория: **6 октября 2026** (не заявление о последних версиях npm).
 
 - **pi** 1.0.4
-- **провайдер/модель по умолчанию**: `openai-codex/gpt-6-sol`, thinking `xhigh`
-- **другие доступные модели**: `deepseek/deepseek-flash`, `openai-codex/gpt-6.1-sol`, `openai-codex/gpt-6-astra` (medium); неиспользуемый RunPod-туннель убран из канонической конфигурации
+- **провайдер/модель по умолчанию**: `openai-codex/gpt-6.1-sol`, thinking `high`
+- **другие доступные модели**: `deepseek/deepseek-flash`, `openai-codex/gpt-6-sol`, `openai-codex/gpt-6-astra` (medium); неиспользуемый RunPod-туннель убран из канонической конфигурации
 - **thinking**: у DeepSeek уровни `medium`/`xhigh` скрыты (`thinkingLevelMap`)
 - **compaction**: для доступных GPT-моделей с окном 272k `reserveTokens: 27000` → порог авто-компактизации при превышении 245k; для остальных моделей `reserveTokens: 1000`. `keepRecentTokens: 500` остаётся общим
 - **thinking-блоки скрыты**: видно `Thinking…` во время и `Thought for Ns` после, содержимое не рендерится (`hideThinkingBlock: true`)

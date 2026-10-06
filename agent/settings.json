@@ -17,9 +17,10 @@
   "lastChangelogVersion": "1.0.4",
   "theme": "claude-code-light-hc/claude-code-dark",
   "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-6-sol",
-  "defaultThinkingLevel": "xhigh",
+  "defaultModel": "gpt-6.1-sol",
+  "defaultThinkingLevel": "high",
   "modelThinkingLevels": {
+    "openai-codex/gpt-6.1-sol": "high",
     "openai-codex/gpt-6-astra": "medium",
     "openai-codex/gpt-6-sol": "xhigh"
   },
