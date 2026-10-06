@@ -1,8 +1,10 @@
 import type { StatusLineCommandConfig } from "./types";
 import { visibleWidth, truncateToWidth } from "@earendil-works/pi-tui";
-// pi-harness: compact throughput fields in the existing footer, v1.
+// pi-harness: compact throughput fields in the existing footer, v2.
 
 const UI_KEY = "pi-statusline";
+// Match assets/statusline.py: terminal palette gray, including separators.
+const statusGray = (text: string): string => `\u001b[38;5;8m${text}\u001b[0m`;
 
 function padLines(lines: string[], padding: number): string[] {
   const pad = " ".repeat(Math.max(0, padding));
@@ -93,10 +95,10 @@ export function applyStatusLineUi(ctx: any, config: StatusLineCommandConfig, lin
       // Wrap between fields when the pane is narrow; no metric is silently
       // dropped and the external status command is not re-run per delta.
       for (const field of throughput.split(" ● ")) {
-        const combined = current ? `${current} ● ${field}` : field;
+        const combined = current ? `${current}${statusGray(` ● ${field}`)}` : statusGray(field);
         if (current && visibleWidth(combined) > width) {
           output.push(truncateToWidth(current, width, ""));
-          current = field;
+          current = statusGray(field);
         } else current = combined;
       }
       output.push(truncateToWidth(current, width, ""));

@@ -7,7 +7,8 @@ The default `pi-live-throughput` display is compact footer status:
 ```
 
 Only four extra fields are shown. `pi-statusline` appends them to its existing
-footer through `FooterDataProvider.getExtensionStatuses()`. Output updates do
+footer through `FooterDataProvider.getExtensionStatuses()`. Fields and separators
+use the same terminal gray (palette 8) as the existing status command. Output updates do
 not re-run the external status command. Narrow panes wrap between fields so the
 last metric is not silently lost. The widget above the editor is disabled by
 default; `/throughput off|on|status|widget` remains available.

@@ -1,12 +1,12 @@
 # Расширения: что стоит, зачем и с какими настройками
 
-**Актуальный набор (5 октября 2026):** `better-claude-code-ui@0.1.8` (рендер тулов в стиле CC, из него же тема), `@fadouse/pi-math@0.2.0` (MathJax-картинки),
+**Актуальный набор (6 октября 2026):** `better-claude-code-ui@0.1.9` (рендер тулов в стиле CC, из него же тема), `@fadouse/pi-math@0.2.0` (MathJax-картинки),
 `pi-statusline` (статус-строка = тот же скрипт, что в Claude Code — см. [`statusline.md`](statusline.md)),
 `@tintinweb/pi-subagents`, `pi-deepseek-search`, `pi-live-throughput`, `pi-mcp-adapter`, `pi-openai-toolkit`,
 `@vanillagreen/pi-session-manager@2.0.4` и локальный `zzzz-compact-tools.ts`. Разделы ниже — по пакетам;
 `pi-claude-code-ui` оставлен установленным, но **отключён** (`"extensions": []`), его место занял форк.
 
-## better-claude-code-ui (0.1.8)
+## better-claude-code-ui (0.1.9)
 
 Клон-форк `pi-claude-code-ui`: те же задачи (баннер, спиннер с CC-вербами, статус-строка, CC-рендер тулов,
 Shiki-диффы, группировка вызовов), но без двух багов того пакета: chrome берётся из токенов **активной темы** (без
@@ -19,7 +19,7 @@ Shiki-диффы, группировка вызовов), но без двух �
 `pi-statusline`.
 
 Патч: `patches/fix-better-cc-ui-light-legibility.mjs` — светлый diff-chrome, глоу спиннера от темы, контекстные строки
-диффа без `DIM`, отключённый футер. Патч применяется `install.sh`, идемпотентен, воспроизводим из чистого апстрима
+диффа без `DIM`, отключённый футер. Патч применяется `install.sh` и `update.sh`, проверен на 0.1.9, идемпотентен, воспроизводим из чистого апстрима
 байт-в-байт (команды — в [`verification.md`](verification.md), п. 7).
 
 Установленный форк читает `groupToolCalls`, `ccToolsExtraDetail`, `ccTheme` из `~/.pi/settings.json`.

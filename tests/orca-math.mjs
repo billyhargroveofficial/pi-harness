@@ -97,5 +97,6 @@ try {
 const settings = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8"));
 assert.ok(settings.packages.includes("npm:@fadouse/pi-math@0.2.0"));
 assert.ok(settings.packages.some((p) => p.source === "npm:pi-claude-code-ui" && p.extensions?.length === 0));
-assert.ok(settings.packages.includes("npm:better-claude-code-ui@0.1.8"));
+const testedVersions = JSON.parse(readFileSync(new URL("../assets/tested-package-versions.json", import.meta.url), "utf8"));
+assert.ok(settings.packages.includes(`npm:better-claude-code-ui@${testedVersions["better-claude-code-ui"]}`));
 console.log("OK: Orca Kitty images, display + inline MathJax, literal code, fallback, current UI config");

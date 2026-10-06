@@ -37,7 +37,7 @@ JSON-пути адаптируются к `$HOME`; существующие ко
 
 Снимок конфигурации репозитория: **5 октября 2026** (не заявление о последних версиях npm).
 
-- **pi** 1.0.2
+- **pi** 1.0.4
 - **провайдер/модель по умолчанию**: `openai-codex/gpt-6-sol`, thinking `xhigh`
 - **другие доступные модели**: `deepseek/deepseek-flash`, `openai-codex/gpt-6.1-sol`, `openai-codex/gpt-6-astra` (medium); неиспользуемый RunPod-туннель убран из канонической конфигурации
 - **thinking**: у DeepSeek уровни `medium`/`xhigh` скрыты (`thinkingLevelMap`)
@@ -57,9 +57,9 @@ JSON-пути адаптируются к `$HOME`; существующие ко
 
 | Пакет | Версия | Зачем |
 |---|---|---|
-| `better-claude-code-ui` | 0.1.8 | Рендер тулов в стиле Claude Code: группировка вызовов, Shiki-диффы, `Thought for Ns`, спиннер с CC-вербами, MCP-рендер(+ тема `claude-code-dark`) |
+| `better-claude-code-ui` | 0.1.9 | Рендер тулов в стиле Claude Code: группировка вызовов, Shiki-диффы, `Thought for Ns`, спиннер с CC-вербами, MCP-рендер(+ тема `claude-code-dark`) |
 | `pi-statusline` | 0.0.2 | Статус-строка внешней командой (CC-совместимый JSON на stdin) — внизу та же строка, что в Claude Code; патч `fix-pi-statusline-refresh` |
-| `pi-mcp-adapter` | 5.0.0 | MCP-серверы в pi (notion, telegram) |
+| `pi-mcp-adapter` | 5.1.0 | MCP-серверы в pi (notion, telegram) |
 | `@tintinweb/pi-subagents` | 0.19.0 проверена; npm без version pin | Субагенты и workflow-оркестрация; патчи `fix-subagents-typebox-peers` и `fix-subagents-live-tools` (live Activity) |
 | `pi-deepseek-search` | 1.0.20 | Нативный веб-поиск DeepSeek как инструмент |
 | `pi-live-throughput` | 0.3.0 | Нижний футер: `momentum`, `cumulative`, cache hit %, session input; native TPS без hidden reasoning, последнее текущее значение сохраняется |
