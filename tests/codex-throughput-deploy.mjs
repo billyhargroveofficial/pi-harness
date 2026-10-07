@@ -10,7 +10,7 @@ import {buildPlan,applyPlan,digest} from '../patches/fix-pi-live-throughput-code
 import {resolveReferenceTokenizer} from '../patches/pi-live-throughput/reference-tokenizer.ts';
 const repo=dirname(dirname(fileURLToPath(import.meta.url)));
 const temp=mkdtempSync(join(tmpdir(),'pi-tps-deploy-tests-'));
-const env={...process.env,npm_config_cache:join(temp,'npm-cache'),TPS_TOKENIZER_DIR:'/tmp/pi-tps-runtime-20261007'};
+const env={...process.env,npm_config_cache:join(temp,'npm-cache')};
 let checks=0,id=0;
 const put=(path,data)=>{mkdirSync(dirname(path),{recursive:true});writeFileSync(path,data);};
 const run=(script,args=[],extra={})=>spawnSync('bash',[script,...args],{env:{...env,...extra},encoding:'utf8',timeout:180000});
@@ -60,6 +60,15 @@ try{
   assert.ok(await applyPlan(plan)>0);
   for(const item of plan)assert.deepEqual(readFileSync(item.path),item.bytes);
   const snap=snapshot(f.agent);assert.equal(await applyPlan(buildPlan(f.options)),0);assert.deepEqual(snapshot(f.agent),snap);
+ });
+ await test('c6faee7 hybrid predecessors migrate as a complete guarded set',async()=>{
+  const f=fixture();
+  for(const name of ['index.ts','codex-throughput.ts','reference-tokenizer.ts']){
+   const r=spawnSync('git',['show',`c6faee7:patches/pi-live-throughput/${name}`],{cwd:repo});assert.equal(r.status,0);
+   put(join(f.src,name),r.stdout);put(join(f.agent,'patches/pi-live-throughput',name),r.stdout);
+  }
+  const patch=spawnSync('git',['show','c6faee7:patches/fix-pi-live-throughput-codex.mjs'],{cwd:repo});assert.equal(patch.status,0);put(join(f.agent,'patches/fix-pi-live-throughput-codex.mjs'),patch.stdout);
+  const plan=buildPlan({...f.options,payloadDir:join(repo,'patches/pi-live-throughput')});assert.ok(await applyPlan(plan)>0);assert.equal(await applyPlan(buildPlan({...f.options,payloadDir:join(repo,'patches/pi-live-throughput')})),0);
  });
  for(const number of [2,3])await test(`write ${number} failure rolls back whole overlay + copies`,async()=>{
   const f=fixture(),snap=snapshot(f.agent);
@@ -178,7 +187,7 @@ try{
   const result=run(join(fixtureRepo,'assets/deploy-tps-speedometer.sh'),[],{PI_CODING_AGENT_DIR:f.agent});
   assert.equal(result.status,0,`${result.stdout}\n${result.stderr}`);
   assert.match(result.stdout,/installed TPS source loads through actual Pi loader/);
-  for(const label of ['independent-oracles','extension-footer-guards','native-session','native-transport'])assert.match(result.stdout,new RegExp(label));
+  for(const label of ['independent-oracles','extension-footer-guards','stream-session','native-transport'])assert.match(result.stdout,new RegExp(label));
   for(const name of ['index.ts','codex-throughput.ts','reference-tokenizer.ts']){
    assert.deepEqual(readFileSync(join(f.src,name)),readFileSync(join(fixtureRepo,'patches/pi-live-throughput',name)));
    assert.deepEqual(readFileSync(join(f.agent,'patches/pi-live-throughput',name)),readFileSync(join(fixtureRepo,'patches/pi-live-throughput',name)));
@@ -208,8 +217,8 @@ try{
  await test('first install through default installer stages + verifies entire TPS feature',()=>{
   const f=fixture(),fixtureRepo=verificationRepo(f);rmSync(join(f.agent,'npm'),{recursive:true});rmSync(join(f.agent,'patches'),{recursive:true});
   const result=run(join(fixtureRepo,'assets/install-tps-runtime.sh'),[],{PI_CODING_AGENT_DIR:f.agent});assert.equal(result.status,0,`${result.stdout}\n${result.stderr}`);
-  for(const label of ['independent-oracles','extension-footer-guards','native-session','native-transport'])assert.ok(result.stdout.includes(label));
-  assert.match(result.stdout,/offline hybrid\/reference\/native-ledger\/controller\/real-loader/);
+  for(const label of ['independent-oracles','extension-footer-guards','stream-session','native-transport'])assert.ok(result.stdout.includes(label));
+  assert.match(result.stdout,/offline stream\/reference\/stream-ledger\/controller\/real-loader/);
   assert.equal(typeof resolveReferenceTokenizer({dir:join(f.agent,'tps-runtime')}),'function');
   assert.equal(JSON.parse(readFileSync(join(f.agent,'npm/node_modules/pi-live-throughput/package.json'))).pi.extensions[0],'./src/index.ts');
   assert.ok(!readdirSync(f.agent).some(name=>name.startsWith('.tps-deploy')||name.includes('rollback-')));

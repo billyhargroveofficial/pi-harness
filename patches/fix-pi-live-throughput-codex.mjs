@@ -11,9 +11,9 @@ const self = fileURLToPath(import.meta.url);
 const patchDir = dirname(realpathSync(self));
 export const digest = data => createHash('sha256').update(data).digest('hex');
 const originalHashes = ['0e2e684dedb9c6dce73aa12d3c8e6f3ce49a1634e2773468c5234253637e0cbf', '177b70be09ae6b4cab2069d89b22a4bae032d98aca89bbe900e579e9a87d3957'];
-const previousIndex = ['b826cd964e6bfa98afd6443c3c19cd6493fcf49b7ed9acdc1de06faba3e05987', 'ad7b3e7b3e07d459f33a6d2a06eb0ef1a092fbf9027c88c4a3b8c8a945f6fcac', '4021f61cc6d6cc75ccc8d58118962d046ef7a066f37164586b6a3ca4c1959328', 'a5138eb008a8e433b6ac0d208120647cab6bb58294c521a9de4b0118df2e97a8'];
-const previousMetrics = ['cf9a7e4936029762e734dad3231542c705baece6f58a169ea3e9c64588ec7b2c', '31b3c9d0dde01a2be1b34abed7ed36029e8ef680f5781ea4c431314296744db8', '8d8adf0b4dbab83c973b0465fe1dd856fca964fee5f3d8ef43bc6ff9e1acf1b8', '08101db14296751bf05b0dae5df3892d1188fcd5e6b537ed33492c601387b7aa'];
-const previousPatch = ['904a9f0de4244f12319d2ea1f1767f440950950a44ba26a01ccf4b2e04a70e35'];
+const previousIndex = ['f9413b27398ea8874de3cc3465fe24c22c29672fd6d0b3d2386ac9225c78966f', 'b826cd964e6bfa98afd6443c3c19cd6493fcf49b7ed9acdc1de06faba3e05987', 'ad7b3e7b3e07d459f33a6d2a06eb0ef1a092fbf9027c88c4a3b8c8a945f6fcac', '4021f61cc6d6cc75ccc8d58118962d046ef7a066f37164586b6a3ca4c1959328', 'a5138eb008a8e433b6ac0d208120647cab6bb58294c521a9de4b0118df2e97a8'];
+const previousMetrics = ['25c81a1d4425c460121fc08f97f3e5dd81a768738d4a67753b05acf326339c8e', 'cf9a7e4936029762e734dad3231542c705baece6f58a169ea3e9c64588ec7b2c', '31b3c9d0dde01a2be1b34abed7ed36029e8ef680f5781ea4c431314296744db8', '8d8adf0b4dbab83c973b0465fe1dd856fca964fee5f3d8ef43bc6ff9e1acf1b8', '08101db14296751bf05b0dae5df3892d1188fcd5e6b537ed33492c601387b7aa'];
+const previousPatch = ['9ec758ed7c2eb64abb06bebf38b858d69c9fc100de3e839e3580d658ab4a059d', '904a9f0de4244f12319d2ea1f1767f440950950a44ba26a01ccf4b2e04a70e35'];
 const previousTokenizer = ['9fdef84a599e6d8cd3e4fa80baf508b60ff268197c0f382b02c1e4baaebcc7f7'];
 const stat = path => { try { return lstatSync(path); } catch (error) { if (error.code === 'ENOENT') return undefined; throw error; } };
 function regular(path, root = dirname(path)) {
@@ -202,6 +202,6 @@ async function main() {
     if(!resolveReferenceTokenizer({dir:runtimeStage}))throw new Error('Invalid staged TPS runtime pin/encoder');
   }
   const count=await applyPlan(plan,{runtimeStage,runtimeTarget:join(agentDir,'tps-runtime'),verify:args.includes('--verify')?()=>verifyInstalled(agentDir,target):undefined});
-  console.log(count||runtimeStage?'patched: independent LIVE reference BPE + native session AVG':'already patched: hybrid TPS');
+  console.log(count||runtimeStage?'patched: reference-BPE LIVE + observed stream session AVG':'already patched: observed stream TPS');
 }
 if(process.argv[1]&&existsSync(process.argv[1])&&realpathSync(process.argv[1])===realpathSync(self))await main();

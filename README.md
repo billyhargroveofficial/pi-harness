@@ -47,7 +47,7 @@ JSON-пути адаптируются к `$HOME`; существующие ко
 - **статус-строка**: `pi-statusline` запускает тот же скрипт, что и Claude Code, с флагом `--no-quota` — папка, модель, размер контекста (`1M`), **реальный** уровень мышления, токены и `· имя сессии` (только pi); квота Codex в pi не спрашивается
 - **TUI**: fullscreen
 - **компактный вывод тулов**: одна строка без stdout, диффов, картинок и стриминг-превью; `Ctrl+O` раскрывает обычный рендер, `/compact-tools off` возвращает старый вид. Мигающая точка сохраняет своё место — текст не дёргается. Дополнительной группировки одинаковых вызовов нет; после сообщений пользователя и ассистента добавляется пустая строка
-- **метрики**: `· ~32.2 ~45.5 TPS hit 90.9% in 28.00M out 229k` в нижнем статусбаре. Первое число — LIVE в reference-BPE `o200k_base`, второе — независимый native AVG: сумма output (включая reasoning) / сумма длительностей измеренных Codex-запросов. Native usage не масштабирует LIVE; idle между запросами не разбавляет AVG. Это delivery/effective request metrics, не backend decode TPS. Durable AVG начинается с включения/reset эпохи; неизвестный coverage даёт `-`, а старые usage без времени не выдумывают среднее. `in/out` — прежний записанный расход всей сессии. `/throughput reset` очищает LIVE, `reset-avg` — эпоху AVG. Подробности и пределы — ниже.
+- **метрики**: `· ~32.2 ~45.5 TPS hit 90.9% in 28.00M out 229k`. Первое число — rolling LIVE, второе — средний наблюдаемый text/tool-input поток в reference-BPE `o200k_base`: сумма prefix differences / сумма first→last content intervals. Ожидание до текста, terminal tail и межзапросный idle исключены; первый untimed chunk исключён согласованно. Native usage не масштабирует TPS и сохраняется в `in/out` (включая reasoning); это клиентская delivery metric, не точный backend decode TPS. AVG охватывает измеримые интервалы ≥1s, untimed ответы не выдумывают скорость. Старые native AVG records не переиспользуются: после `/reload` начинается новая stream эпоха. `/throughput reset` очищает LIVE, `reset-avg` — AVG; прежний футер сохранён.
 - **сессии**: `/sessions` от `@vanillagreen/pi-session-manager` открывает Current/All (`Tab`) и скрывает сохранённые сессии субагентов, оставляя обычные форки/ветки. Патч `fix-pi-session-manager-hide-subagents` не меняет штатный `/resume`, файлы сессий и возобновление субагентов по `@handle`.
 - **формулы**: `@fadouse/pi-math@0.2.0` рисует MathJax-картинки через Kitty внутри Orca; локальное расширение `orca-kitty-images.ts` передаёт Pi графические возможности Orca. Формулы слева: белые в тёмной теме и тёмные в светлой, цвет меняется вместе с темой. Дисплейные формулы в Orca ужимаются в одну строку, иначе построчная перерисовка стирает картинки. Старый `pi-claude-code-ui` с Unicode-конвертером отключён; активен совместимый `better-claude-code-ui`.
 
@@ -61,7 +61,7 @@ JSON-пути адаптируются к `$HOME`; существующие ко
 | `pi-statusline` | 0.0.2 | Статус-строка внешней командой (CC-совместимый JSON на stdin) — внизу та же строка, что в Claude Code; патч `fix-pi-statusline-refresh` |
 | `pi-mcp-adapter` | 5.1.0 | MCP-серверы в pi (notion, telegram) |
 | `@tintinweb/pi-subagents` | 0.19.0 проверена; npm без version pin | Субагенты и workflow-оркестрация; патчи `fix-subagents-typebox-peers` и `fix-subagents-live-tools` (live Activity) |
-| `pi-live-throughput` | 0.3.0 + hybrid overlay | Нижний футер: `~LIVE ~AVG TPS`, независимые reference-BPE и native counters, durable coverage, hit % и session in/out |
+| `pi-live-throughput` | 0.3.0 + stream overlay | Нижний футер: `~LIVE ~AVG TPS`, rolling и whole-stream reference-BPE counters, durable coverage, native hit % и session in/out |
 | `pi-openai-toolkit` | 0.20.8 | Инструменты интеграции OpenAI, добавлен в текущие настройки |
 | `@vanillagreen/pi-session-manager` | 2.0.4 | Менеджер `/sessions`: поиск, Current/All, возобновление, переименование и удаление; патч скрывает субагентов только в этом списке |
 | `@fadouse/pi-math` | 0.2.0 | Настоящие LaTeX-картинки внутри Orca (MathJax → Kitty); патчи для однострочного отображения в Orca и зависимости xmldom |
@@ -72,7 +72,7 @@ JSON-пути адаптируются к `$HOME`; существующие ко
 
 Подробности по каждому решению — в `docs/`:
 
-- [`docs/codex-throughput.md`](docs/codex-throughput.md) — гибрид LIVE/native AVG, независимые числители и фазы, persistence/reset/coverage, offline transport/session/deployment проверки
+- [`docs/codex-throughput.md`](docs/codex-throughput.md) — LIVE/stream AVG, first/last content boundaries, persistence/reset/coverage, native usage отдельно, offline transport/session/deployment проверки
 - [`docs/extensions.md`](docs/extensions.md) — что за расширения, какие у них настройки и что у них мертво
 - [`docs/statusline.md`](docs/statusline.md) — статус-строка: `pi-statusline` + тот же скрипт (без квоты Codex, реальный уровень мышления)
 - [`docs/light-theme.md`](docs/light-theme.md) — авто light/dark, светлая тема и патчи к cc-ui (две итерации)
@@ -83,7 +83,7 @@ JSON-пути адаптируются к `$HOME`; существующие ко
 
 ## Как обновлять
 
-Только новый гибридный TPS-счётчик, **без изменений settings, OAuth, темы или
+Только новый потоковый TPS-счётчик, **без изменений settings, OAuth, темы или
 прочих пакетов** (изолированный pinned reference runtime устанавливается вместе
 с overlay; проверки выполняются до завершения общей транзакции):
 
@@ -92,8 +92,8 @@ cd ~/repos/pi-harness
 ./assets/deploy-tps-speedometer.sh
 ```
 
-После установки — `/reload` в Pi. Новый native AVG не восстанавливается из
-старых токенов без времени; начнётся собственная эпоха измерений.
+После установки — `/reload` в Pi. Начнётся новая stream AVG эпоха; старые native
+AVG записи сохраняются, но не подменяют неизвестные first/last content intervals.
 
 Codex-only/TPS/statusline настройки, **без npm-обновлений и замены
 машинной темы, MCP, навыков или пользовательских Codex-defaults**:

@@ -15,7 +15,7 @@ timeout 30 script -q /dev/null pi --tui-mode regular --session \
 
 Так получены цифры из [`compact-output.md`](compact-output.md) и проверка скрытия thinking (5 блоков → 5 строк `Thought for`, 0 утечек).
 
-## 2. Офлайн-прогон гибридного LIVE/native AVG (7 октября 2026)
+## 2. Офлайн-прогон LIVE/observed stream AVG (7 октября 2026)
 
 ```bash
 node tests/codex-throughput.mjs
@@ -26,40 +26,50 @@ node tests/codex-throughput-transport.mjs
 node tests/codex-throughput-deploy.mjs
 ```
 
-Нужен dedicated pinned runtime `<agentDir>/tps-runtime`; TEMP-фикстуру можно
-выбрать `TPS_TOKENIZER_DIR`. LIVE и AVG проверяются **разными** oracle:
-reference-BPE prefix differences и native ratio-of-sums с client operation time.
+Нужен dedicated pinned runtime `<agentDir>/tps-runtime`; TEMP можно выбрать
+через `TPS_TOKENIZER_DIR`. Обе TPS используют reference-BPE prefix differences,
+но LIVE — rolling window, AVG — постоянный first→last content interval ответа.
+Native request durations больше не являются AVG.
 
-После исправлений основным агентом: unit/controller suite — **99 PASS + 600
-математических replay**, independent oracle — **8 PASS**, loader/footer/guards —
-**15 PASS**, actual SessionManager/saved-boundary suite — **34 PASS**, native
-SSE/WebSocket transport — **17 PASS**. Сеть/inference запрещены fixtures;
-настоящие credentials и приватные session contents не читаются.
+Unit/controller — **99 PASS + 600 mathematical replays**, независимые oracle —
+**8 PASS**, loader/footer/guards — **15 PASS**, actual SessionManager/saved-boundary —
+**36 PASS**, subscription SSE/WebSocket — **17 PASS**, runtime/deploy — **46 PASS**.
+Итого **221 checks + 600 replays**. Fixtures запрещают inference/реальную авторизацию.
 
-Exact hybrid fixture выводит `~32.2 ~45.5 TPS`. Нативный `output=320` с
-`reasoning=300` даёт numerator **320**, не 20. Weighted `100/1s + 100/10s`
-даёт **200/11**, не 55. Смена native output не изменяет LIVE.
+Exact fixture даёт `~32.2 ~45.5 TPS`: весь поток 455 reference-токенов /10s,
+последний rolling участок 161/5s. Native output 999999 не меняет оба TPS.
+Weighted `100/1s +100/10s` = **200/11**, не55. Native output 320 (reasoning300)
+сохраняет `out=320`, но не увеличивает наблюдаемый numerator.
 
-Реальный SSE delivery schedule задаёт clock вне metrics callback; whole-body
-buffered test не растягивает события искусственно. Есть actual Pi loader,
-ExtensionRunner, SessionManager/AgentSession boundary, native WS queue,
-retry/continuation, reset-before-deferred-start, late duplicate end, crash gap,
-fork/compaction, saved replacement, dedup/conflicting records и widths 1–220.
-Дополнительные регрессии защищают net signed BPE recovery, replay epoch markers
-и финальные tool identities/arguments независимо от AVG.
+AVG не включает TTFT, terminal/done/save tail, user/tool idle. Проверены крупный
+first atomic prefix и его согласованное исключение, first/last timestamps между
+checkpoint cadence, timer silence, whole-response baseline после LIVE pruning,
+same-time/one-shot/sub-resolution/empty/reasoning-only unmeasured, signed BPE
+recovery и native totals от missing/zero до миллиона. LIVE-only reset посреди
+ответа не уничтожает его AVG. Новый namespace игнорирует и сохраняет прежние
+native records; на reload начинается stream epoch без выдуманной миграции.
 
-Benchmark: 50 000 символов/callbacks, **26** полных encode, около **21 ms** общего
-offline wall time на Mac в конкретном прогоне (не server latency/модельный TPS).
-Runtime/deploy suite — **45 PASS**. Все пять acceptance suites и actual-loader
-smoke прошли также внутри реального Mac deployment против installed bytes,
-без `TPS_TOKENIZER_DIR`; successful install не подменён canonical-only тестами.
-Суммарно: **218 checks + 600 mathematical replays**. Восемь файлов моделей,
-OAuth/инструкций/настроек и существующего футера остались byte-identical.
-Isolated updater regression дополнительно проверяет flags/reinstall/error
-propagation; его HOME и agent directory находятся только в TEMP.
+Настоящие Pi loader/ExtensionRunner/SessionManager/AgentSession replacement/save
+boundary; native SSE parser и WS queue/retry/continuation. Delivery clock задаёт
+внешний fixture driver, не метрика; whole-body burst не становится растянутым
+stream. Real wall-clock stream с медленным соседним extension проверяет last
+content boundary, не start→terminal. Crash/fork/tree/compaction/model/reset,
+duplicate/late/conflicting events, saved text/tool identity и widths1–220 проверены.
 
-Контракт и пределы: [codex-throughput.md](codex-throughput.md). Старые UTF-16/4
-или native-rescaled числа не используются как эталон новой схемы.
+Benchmark 50k callbacks: **26** full-prefix encode; около **22ms** на Mac в одном
+прогоне — offline CPU fixture, не модельный TPS. Все пять acceptance suites и
+actual-loader smoke запускаются транзакционно против **installed bytes**; guard
+поддерживает predecessor c6faee7, rollback источников/runtime/canonical copies,
+idempotence, first install, отказ на local edits и symlink escapes.
+
+Protected files проверяются SHA-256 до/после feature-only deployment: models,
+OAuth, settings/инструкции, Python statusline и существующий footer не изменяются.
+Updater regression работает только в TEMP HOME и проверяет propagation ошибки23.
+Полный набор сохранённых statusline/Codex-only/portable config/compact-tools/
+subagents/session-manager/Orca Math регрессий также проходит.
+
+Контракт: [codex-throughput.md](codex-throughput.md). Native effective request AVG
+из предыдущей версии — историческая метрика, не эталон новой потоковой схемы.
 
 ## 3. Проверка загрузки
 

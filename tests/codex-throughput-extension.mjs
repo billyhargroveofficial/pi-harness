@@ -32,8 +32,8 @@ async function fixture(fn,options){const h=await harness(options);try{await fn(h
 try{
  const footerBridge=join(temp,'footer-fixture.ts');const uiSource=process.env.STATUSLINE_UI_SOURCE??join(repo,'patches/pi-live-throughput/statusline-ui.ts');
  put(footerBridge,`import {applyStatusLineUi} from ${JSON.stringify(uiSource)};export default function(pi){pi.on('session_start',(_event,ctx)=>applyStatusLineUi(ctx,{placement:'footer'},['📁 harness-space ● GPT-6.1 Sol 272k high 18k · named']));}`);
- await suite.test('actual loader/footer exact adjacent LIVE/native AVG once, middle dots and gray',()=>fixture(async h=>{
-  const op=await operation(h,{id:'footer',duration:10000,output:455,texts:[' seed',' a'.repeat(161)],times:[5000,10000]});await op.save();
+ await suite.test('actual loader/footer exact adjacent LIVE/stream AVG once, middle dots and gray',()=>fixture(async h=>{
+  const op=await operation(h,{id:'footer',duration:11000,output:455,texts:[' seed',' a'.repeat(294),' a'.repeat(161)],times:[1000,6000,11000]});await op.save();
   const lines=h.footer.render(220);const text=clean(lines.join(' '));
   assert.match(text,/harness-space · GPT-6\.1 Sol.* · ~32\.2 ~45\.5 TPS hit 90\.0% in 1\.0k out 455/);
   assert.equal((text.match(/TPS/g)??[]).length,1);assert.doesNotMatch(text,/●|CURRENT|AVG|cumulative|momentum/);
@@ -68,14 +68,14 @@ try{
   await session._emitExtensionEvent({type:'message_end',message:op.message});assert.equal(h.d.ledger.value,undefined);
   assert.equal(op.message.content[0].text,'final replacement fixture');const id=h.manager.appendMessage(op.message);
   await session._emitExtensionEvent({type:'turn_end',message:op.message,toolResults:[]});
-  assert.equal(h.manager.getEntry(id).message,op.message);close(h.d.ledger.value,320);assert.equal(h.d.heldRate,undefined);
+  assert.equal(h.manager.getEntry(id).message,op.message);assert.equal(h.d.ledger.value,undefined);assert.equal(h.d.ledger.average.unknown,true);assert.equal(h.d.heldRate,undefined);
  }));
  await suite.test('LAST held during idle/new warmup; malformed active stream cannot overwrite',()=>fixture(async h=>{
   await (await operation(h,{id:'last',duration:3000,texts:[' seed',' a'.repeat(100)],times:[1000,2000]})).save();const before=h.line;
   await h.emit('session_tree',{},100000);assert.equal(h.line,before);
   await h.emit('before_provider_request',{},100000);assert.equal(h.line,before);
   await h.raw({type:'response.output_text.delta',item_id:'missing',content_index:0,delta:'malformed'},100001);assert.equal(h.line,before);
-  await h.command('reset');assert.match(h.line,/^- ~33\.3 TPS/);
+  await h.command('reset');assert.match(h.line,/^- ~100\.0 TPS/);
  }));
  await suite.test('real UI timer advances active silence to 0.0, adds no fake volume or AVG duration',()=>fixture(async h=>{
   await h.emit('before_provider_request',{},0);await h.raw({type:'response.created',response:{id:'silence'}},0);await h.raw({type:'response.output_item.added',item:{id:'m',type:'message'}},0);

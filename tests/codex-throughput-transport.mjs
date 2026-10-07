@@ -87,32 +87,32 @@ async function fixture(fn,options){const h=await harness(options);try{await fn(h
 try{
  for(const transport of ['sse','websocket'])await suite.test(`${transport}: whole-body queued burst does NOT fabricate timed LIVE; native includes TTFT`,()=>fixture(async h=>{
   const f=frames();const result=await run(h,f,{transport,buffered:true});assert.equal(result.message.stopReason,'stop');
-  assert.match(h.line,/^- ~106\.7 TPS/);assert.equal(h.d.heldRate,undefined);close(h.d.ledger.value,320/3);
-  assert.equal(new Set(result.seen.map(s=>s.t)).size,1);assert.equal(h.d.ledger.average.elapsedMs,3000);
+  assert.match(h.line,/^- - TPS/);assert.equal(h.d.heldRate,undefined);assert.equal(h.d.ledger.value,undefined);
+  assert.equal(new Set(result.seen.map(s=>s.t)).size,1);assert.equal(h.d.ledger.average.elapsedMs,0);assert.equal(h.d.ledger.average.unknown,false);
  }));
  for(const transport of ['sse','websocket'])await suite.test(`${transport}: scheduled external fixture clocks + native parser exact reference count`,()=>fixture(async h=>{
   const f=frames();const result=await run(h,f,{transport});assert.equal(result.message.stopReason,'stop');
-  close(h.d.heldRate,(count(f.text)-count(f.texts[0]))/2);close(h.d.ledger.value,320/3);
+  close(h.d.heldRate,(count(f.text)-count(f.texts[0]))/2);close(h.d.ledger.value,(count(f.text)-count(f.texts[0]))/1.5);
   assert.equal(h.d.measurement.window.tokens,count(f.text));assert.equal(result.seen.length,f.list.length);assert.equal(h.d.measurement.invalid,false);
-  assert.equal(h.line,`~${((count(f.text)-count(f.texts[0]))/2).toFixed(1)} ~106.7 TPS hit 90.0% in 1.0k out 320`);
+  assert.equal(h.line,`~${((count(f.text)-count(f.texts[0]))/2).toFixed(1)} ~${((count(f.text)-count(f.texts[0]))/1.5).toFixed(1)} TPS hit 90.0% in 1.0k out 320`);
  }));
  for(const transport of ['sse','websocket'])await suite.test(`${transport}: terminal failure with trustworthy raw usage counts despite SDK normalized zeros`,()=>fixture(async h=>{
-  const f=frames({terminal:'response.failed'});const result=await run(h,f,{transport});assert.equal(result.message.stopReason,'error');close(h.d.ledger.value,320/3);
+  const f=frames({terminal:'response.failed'});const result=await run(h,f,{transport});assert.equal(result.message.stopReason,'error');assert.equal(h.d.ledger.value,undefined);assert.equal(h.d.ledger.average.unknown,true);
  }));
- await suite.test('SSE: missing raw total not mistaken for normalized zero',()=>fixture(async h=>{
-  const result=await run(h,frames({output:null}),{});assert.equal(result.message.usage.output,0);assert.equal(h.d.ledger.value,undefined);assert.equal(h.d.ledger.average.unknown,true);
+ await suite.test('SSE: missing native total does not invalidate observed stream AVG',()=>fixture(async h=>{
+  const f=frames({output:null});const result=await run(h,f,{});assert.equal(result.message.usage.output,0);close(h.d.ledger.value,(count(f.text)-count(f.texts[0]))/1.5);assert.equal(h.d.ledger.average.unknown,false);
  }));
  await suite.test('SSE: true surrogate halves + multilingual/special-looking prefixes ordinary BPE',()=>fixture(async h=>{
   const texts=['<|endoftext|> Русский 中文 \ud83d','\ude00',' 世界',' code'];const f=frames({texts});const result=await run(h,f);
-  assert.equal(result.message.content.find(p=>p.type==='text').text,texts.join(''));assert.equal(h.d.measurement.window.tokens,count(texts.join('')));close(h.d.ledger.value,320/3);
+  assert.equal(result.message.content.find(p=>p.type==='text').text,texts.join(''));assert.equal(h.d.measurement.window.tokens,count(texts.join('')));close(h.d.ledger.value,(count(f.text)-count(f.texts[0]))/1.5);
  }));
- await suite.test('SSE: chunk-invariant full prefix, native changes only AVG',async()=>{
+ await suite.test('SSE: chunk-invariant full prefix, native total changes neither TPS',async()=>{
   let held;for(const output of [1,1000000])await fixture(async h=>{
-   const f=frames({output});await run(h,f);if(held===undefined)held=h.d.heldRate;else close(h.d.heldRate,held);close(h.d.ledger.value,output/3);
+   const f=frames({output});await run(h,f);if(held===undefined)held=h.d.heldRate;else close(h.d.heldRate,held);close(h.d.ledger.value,(count(f.text)-count(f.texts[0]))/1.5);
   });
  });
  await suite.test('SSE: genuine pre-created response.in_progress identity accepted',()=>fixture(async h=>{
-  const f=frames();f.list[0].data={type:'response.in_progress',sequence_number:0,response:{id:'response'}};await run(h,f);assert.equal(h.d.measurement.invalid,false);close(h.d.ledger.value,320/3);
+  const f=frames();f.list[0].data={type:'response.in_progress',sequence_number:0,response:{id:'response'}};await run(h,f);assert.equal(h.d.measurement.invalid,false);close(h.d.ledger.value,(count(f.text)-count(f.texts[0]))/1.5);
  }));
  await suite.test('SSE: buffered malformed content-before-created poisons coverage, not held LAST',()=>fixture(async h=>{
   await run(h,frames({id:'good'}));const held=h.d.heldRate;
@@ -126,11 +126,11 @@ try{
    const f=frames({texts:[' seed',' alpha',' beta']});
    const times=[0,5,10,15,20,25,30,100,700,1200,1500,1501,1600];assert.equal(times.length,f.list.length);f.list.forEach((x,i)=>x.t=times[i]);f.end=1600;
    const result=await run(h,f,{scheduledReal:true,slowNeighbor:true});
-   const terminal=result.seen.find(x=>x.data.type==='response.completed');
-   close(h.d.ledger.average.nativeTokens,320);assert.ok(h.d.ledger.average.elapsedMs>=1500&&h.d.ledger.average.elapsedMs<5000);
-   // Timestamp readings around adjacent extension callbacks can differ slightly;
-   // oracle uses independent observed wall clock, not exact artificial equality.
-   assert.ok(Math.abs(h.d.ledger.average.elapsedMs-(terminal.t-result.startedAt))<20);
+   const deltas=result.seen.filter(x=>x.data.type==='response.output_text.delta');
+   close(h.d.ledger.average.tokens,count(f.text)-count(f.texts[0]));assert.ok(h.d.ledger.average.elapsedMs>=1000&&h.d.ledger.average.elapsedMs<5000);
+   // Adjacent extension readings can differ slightly. AVG follows first→last
+   // actual content callback, NOT request start→terminal callback.
+   assert.ok(Math.abs(h.d.ledger.average.elapsedMs-(deltas.at(-1).t-deltas[0].t))<20);
    assert.equal(h.d.measurement.window.tokens,count(f.text));assert.ok(h.d.heldRate>0);assert.ok(h.d.heldRate<20);
   },{clock});
  });
@@ -152,7 +152,7 @@ try{
   for await(const event of response){if(event.type==='start')await h.emit('message_start',{message:event.partial});else if(['done','error'].includes(event.type))await h.save(await response.result());}
   await Promise.all(drivers);if(driverError)throw driverError;
   assert.equal(seen.filter(x=>x==='response.created').length,2);assert.equal(h.d.measurement.invalid,false);
-  if(known)close(h.d.ledger.value,120);else{assert.equal(h.d.ledger.value,undefined);assert.equal(h.d.ledger.average.unknown,true);}
+  assert.equal(h.d.ledger.value,undefined);assert.equal(h.d.ledger.average.unknown,false);assert.equal(h.manager.getEntries().at(-1).data.kind,'unmeasured');
  }));
  await suite.test('native WS cached connection + real previous_response_id continuation stays separate operations',()=>fixture(async h=>{
   const sessionId='offline-cached-native';const initial=MockSocket.connections;const sent=MockSocket.sent.length;
@@ -160,12 +160,12 @@ try{
   const secondUser={role:'user',content:[{type:'text',text:'second fixture turn'}],timestamp:1};
   await run(h,frames({id:'cache-two',output:200}),{transport:'websocket-cached',sessionId,base:10000,context:{messages:[user,first.message,secondUser]}});
   assert.equal(MockSocket.connections-initial,1);assert.equal(MockSocket.sent[sent+1].previous_response_id,'cache-one');
-  close(h.d.ledger.value,50);assert.equal(h.d.ledger.average.elapsedMs,6000);
+  close(h.d.ledger.value,(count(frames().text)-count(frames().texts[0]))/1.5);assert.equal(h.d.ledger.average.elapsedMs,3000);
   assert.equal(getOpenAICodexWebSocketDebugStats(sessionId).connectionsReused,1);
  }));
  await suite.test('native WS connection close after completion does not duplicate saved native observation',()=>fixture(async h=>{
   const result=await run(h,frames(),{transport:'websocket'});assert.equal(result.message.stopReason,'stop');
-  const records=h.manager.getEntries().filter(e=>e.customType==='pi-harness:codex-native-throughput'&&e.data.kind==='observation');assert.equal(records.length,1);close(h.d.ledger.value,320/3);
+  const records=h.manager.getEntries().filter(e=>e.customType==='pi-harness:codex-stream-throughput'&&e.data.kind==='observation');assert.equal(records.length,1);close(h.d.ledger.value,(count(frames().text)-count(frames().texts[0]))/1.5);
  }));
  await suite.test('actual SSE error without turn_end becomes durable UNKNOWN at settle',()=>fixture(async h=>{
   await run(h,frames({terminal:'response.failed'}),{missingEnd:true});assert.equal(h.d.ledger.value,undefined);

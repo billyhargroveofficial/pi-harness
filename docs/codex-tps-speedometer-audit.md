@@ -1,5 +1,14 @@
 # Аудит Codex TPS: решение перед реализацией
 
+**Исторический аудит.** 7 октября 2026 Billy изменил контракт после живых
+`~34.4 ~12.9 TPS` и `~37.1 ~20.5 TPS`: AVG теперь измеряет средний наблюдаемый
+text/tool поток без TTFT и terminal tail, а не native effective request rate.
+Оба TPS используют reference-BPE; native usage остаётся в hit/in/out. Старые
+native records не пересчитываются, новая stream эпоха начинается после reload.
+Текущий контракт: `docs/codex-throughput.md`. Ниже сохранены исходные выводы
+workflow; альтернативные предложения/первое гибридное решение не являются
+описанием текущей реализации.
+
 7 октября 2026. Workflow `codex-tps-speedometer-research`, run `wf_17a6e11e9f66`:
 четыре независимых read-only исследования и один cross-result критик.
 База кода: `ac30afa`; Pi 1.0.4. Это результат исследования, не реализованный v5.

@@ -1,6 +1,6 @@
-/** HYBRID: ~LIVE reference-BPE delivery, ~AVG native effective operation TPS.
- * LIVE fallback is LAST, not a fresh idle observation. AVG starts at the durable
- * enable/reset epoch; historical usage without operation durations is not AVG.
+/** ~LIVE and ~AVG are reference-BPE observed text/tool delivery TPS.
+ * LIVE fallback is LAST, not a fresh idle observation. AVG starts at a new
+ * durable stream epoch; old native request durations cannot be reused.
  */
 import { getAgentDir, type ExtensionAPI, type ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { CodexThroughput, POLICY } from "./codex-throughput.ts";
@@ -40,8 +40,8 @@ export function createThroughputExtension(pi: ExtensionAPI, options: { resolver?
 		bind(ctx); entryCount = -1;
 		codex.sessionReset(); syncUsage(true); codex.bindLedger(manager, append); codex.select(ctx.model);
 		if (timer) clearInterval(timer);
-		// Active silence decays LIVE, never fabricates tokens. No native pending
-		// duration is mixed into the completed-operation denominator.
+		// Active silence decays LIVE, never fabricates tokens. Pending requests
+		// do not dilute completed, measured stream intervals.
 		if (hasUI) { timer = setInterval(render, POLICY.cadenceMs); timer.unref?.(); }
 		clearUi(); render();
 	});
@@ -96,7 +96,7 @@ export function createThroughputExtension(pi: ExtensionAPI, options: { resolver?
 			else if (["reset", "reset-avg", "reset-all"].includes(arg)) {
 				if (arg !== "reset-avg") codex.reset();
 				if (arg !== "reset") codex.resetAverage();
-				clearUi(); render(); ctx.ui.notify(arg === "reset" ? "LIVE reset; AVG and session usage unchanged" : "New native AVG measurement epoch; session usage unchanged", "info"); return;
+				clearUi(); render(); ctx.ui.notify(arg === "reset" ? "LIVE reset; stream AVG and native session usage unchanged" : "New stream AVG measurement epoch; native session usage unchanged", "info"); return;
 			} else { ctx.ui.notify("Usage: /throughput [on|off|widget|status|reset|reset-avg|reset-all|toggle]", "error"); return; }
 			ctx.ui.notify(`Live throughput: ${enabled ? mode : "off"}`, "info");
 		},

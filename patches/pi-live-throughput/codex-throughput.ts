@@ -1,5 +1,5 @@
-// pi-harness HYBRID: independent reference-BPE LIVE and native operation AVG.
-// LIVE is delivery, not backend decode; AVG includes hidden reasoning and TTFT.
+// pi-harness: reference-BPE LIVE and session AVG of observed text/tool delivery.
+// Both exclude hidden reasoning; AVG excludes TTFT, terminal tail and inter-request idle.
 // MIT; original pi-live-throughput copyright/license remains in the package.
 import { createHash, randomUUID } from "node:crypto";
 import { resolveReferenceTokenizer, type TokenizerResolver } from "./reference-tokenizer.ts";
@@ -70,6 +70,8 @@ export class OutputWindow {
 	lastCheckpoint: number | undefined;
 	lastEstimated: number | undefined;
 	estimatedCurrent: number | undefined;
+	firstContent: Sample | undefined;
+	lastContentTime: number | undefined;
 	private tokenizer: ReturnType<TokenizerResolver>;
 	constructor(resolver: TokenizerResolver = resolveReferenceTokenizer) {
 		try { this.tokenizer = resolver(); } catch { this.tokenizer = undefined; }
@@ -86,6 +88,30 @@ export class OutputWindow {
 		if (this.units + delta.length > POLICY.maxUnits) { this.fail("reference-buffer-limit"); return; }
 		const part = this.parts.get(partKey) ?? { text: "", tokens: 0, dirty: false };
 		part.text += delta; part.dirty = true; this.units += delta.length; this.parts.set(partKey, part);
+	}
+	/** Called only for a nonempty raw content delta, never by timers/done events.
+	 * Preserve the FIRST atomic prefix as the untimed baseline. Later timestamps
+	 * advance even between encode checkpoints, so AVG ends at the actual last
+	 * content callback, not the timer/terminal/SDK save callback.
+	 */
+	content(t: number): void {
+		if (this.invalid) return;
+		if (!time(t) || (this.lastContentTime !== undefined && t < this.lastContentTime)) { this.fail("invalid-content-clock"); return; }
+		if (!this.firstContent) {
+			this.checkpoint(t, true);
+			if (!this.invalid) this.firstContent = { t, tokens: this.tokens };
+		}
+		this.lastContentTime = t;
+	}
+	streamInterval(): { tokens: number; elapsedMs: number } | "unmeasured" | undefined {
+		if (this.invalid) return undefined;
+		if (!this.firstContent || this.lastContentTime === undefined) return "unmeasured";
+		const elapsedMs = this.lastContentTime - this.firstContent.t;
+		// Same-time/short delivery is unresolvable, not a native-token division by
+		// a tiny callback gap. This is the same 1s observation resolution as LIVE.
+		if (elapsedMs < POLICY.minSpanMs) return "unmeasured";
+		const tokens = this.tokens - this.firstContent.tokens;
+		return counter(tokens) ? { tokens, elapsedMs } : undefined;
 	}
 	checkpoint(t: number, force = false): number | undefined {
 		if (this.invalid) return undefined;
@@ -128,36 +154,37 @@ export class OutputWindow {
 	clearContent(): void { this.parts.clear(); this.units = 0; }
 }
 
-export const NATIVE_ENTRY = "pi-harness:codex-native-throughput";
-export const NATIVE_METRIC = "native-provider-operation";
-export type NativeRecord = {
-	v: 1; metric: typeof NATIVE_METRIC; kind: "epoch" | "start" | "observation" | "unknown";
+// Deliberately NEW namespace: old native request durations cannot be migrated
+// into observed-stream time. Reload starts a clean, honest measurement epoch.
+export const STREAM_ENTRY = "pi-harness:codex-stream-throughput";
+export const STREAM_METRIC = "reference-stream-delivery";
+export type StreamRecord = {
+	v: 1; metric: typeof STREAM_METRIC; kind: "epoch" | "start" | "observation" | "unmeasured" | "unknown";
 	origin: string; epoch: string; operation?: string; responseHash?: string;
-	provider?: string; api?: string; model?: string; nativeTokens?: number; elapsedMs?: number;
+	provider?: string; api?: string; model?: string; tokens?: number; elapsedMs?: number;
 };
 const identifier = (s: unknown): s is string => typeof s === "string" && s.length > 0 && s.length <= 256;
-export const recordKey = (r: NativeRecord) => `${r.origin}/${r.epoch}/${r.kind === "epoch" ? "epoch" : r.kind === "start" ? "start" : "end"}/${r.operation ?? ""}`;
+export const recordKey = (r: StreamRecord) => `${r.origin}/${r.epoch}/${r.kind === "epoch" ? "epoch" : r.kind === "start" ? "start" : "end"}/${r.operation ?? ""}`;
 const signature = (r: Json) => JSON.stringify(Object.keys(r).sort().map(k => [k, r[k]]));
-const records = (entries: Json[]): NativeRecord[] => entries.filter(e => e.type === "custom" && e.customType === NATIVE_ENTRY).map(e => e.data);
-const validRecord = (r: Json): boolean => !!r && r.v === 1 && r.metric === NATIVE_METRIC && identifier(r.origin) && identifier(r.epoch)
-	&& ["epoch", "start", "observation", "unknown"].includes(r.kind)
+const records = (entries: Json[]): StreamRecord[] => entries.filter(e => e.type === "custom" && e.customType === STREAM_ENTRY).map(e => e.data);
+const validRecord = (r: Json): boolean => !!r && r.v === 1 && r.metric === STREAM_METRIC && identifier(r.origin) && identifier(r.epoch)
+	&& ["epoch", "start", "observation", "unmeasured", "unknown"].includes(r.kind)
 	&& (r.kind === "epoch" || identifier(r.operation))
 	&& (r.kind !== "observation" || (identifier(r.responseHash) && identifier(r.provider) && identifier(r.api) && identifier(r.model)
-		&& counter(r.nativeTokens) && time(r.elapsedMs) && r.elapsedMs > 0 && r.elapsedMs <= Number.MAX_SAFE_INTEGER));
+		&& counter(r.tokens) && time(r.elapsedMs) && r.elapsedMs >= POLICY.minSpanMs && r.elapsedMs <= Number.MAX_SAFE_INTEGER));
 
-/** Pure ratio-of-sums oracle. All own branches/models, excluding inherited
- * foreign-origin records. Pending operations do NOT grow the denominator.
- * Unclosed starts on restore mean UNKNOWN; history before the epoch has no
- * invented duration. AVG is since the counter was enabled/reset, not all history.
+/** Ratio of measured stream-prefix differences to first→last content time.
+ * Own branches/models only; pending/known untimed streams add neither time nor
+ * tokens. Native request records are NEVER reinterpreted as stream intervals.
  */
-export class NativeAverage {
+export class StreamAverage {
 	epoch: string | undefined;
-	nativeTokens = 0;
+	tokens = 0;
 	elapsedMs = 0;
 	unknown = false;
 	observations = 0;
 	restore(entries: Json[], origin: string, pending = new Set<string>()): void {
-		this.epoch = undefined; this.nativeTokens = 0; this.elapsedMs = 0; this.unknown = false; this.observations = 0;
+		this.epoch = undefined; this.tokens = 0; this.elapsedMs = 0; this.unknown = false; this.observations = 0;
 		const source = records(entries), own = source.filter(r => r?.origin === origin);
 		let markerIndex = -1;
 		const markers = new Set<string>();
@@ -174,14 +201,14 @@ export class NativeAverage {
 		// origin/epoch fields are missing. Explicit foreign-origin inheritance
 		// is still excluded. A new epoch clears earlier malformed coverage.
 		this.unknown = source.slice(markerIndex + 1).some(r => !r || ((!identifier(r.origin) || r.origin === origin) && !validRecord(r)));
-		const seen = new Map<string, NativeRecord>();
+		const seen = new Map<string, StreamRecord>();
 		for (const r of own.filter(r => r.epoch === this.epoch)) {
 			if (!validRecord(r)) { this.unknown = true; continue; }
 			const key = recordKey(r), prior = seen.get(key);
 			if (prior && signature(prior) !== signature(r)) this.unknown = true;
 			else seen.set(key, r);
 		}
-		const starts = new Map<string, NativeRecord>(), ends = new Map<string, NativeRecord>();
+		const starts = new Map<string, StreamRecord>(), ends = new Map<string, StreamRecord>();
 		for (const r of seen.values()) {
 			if (r.kind === "start") starts.set(r.operation!, r);
 			else if (r.kind !== "epoch") ends.set(r.operation!, r);
@@ -189,19 +216,20 @@ export class NativeAverage {
 		const responses = new Map<string, string>();
 		for (const [op, r] of ends) {
 			if (!starts.has(op) || r.kind === "unknown") { this.unknown = true; continue; }
+			if (r.kind === "unmeasured") continue;
 			const responseKey = `${r.provider}/${r.responseHash}`;
-			const attribution = signature({ nativeTokens: r.nativeTokens, elapsedMs: r.elapsedMs, provider: r.provider, api: r.api, model: r.model });
+			const attribution = signature({ tokens: r.tokens, elapsedMs: r.elapsedMs, provider: r.provider, api: r.api, model: r.model });
 			if (responses.has(responseKey)) { if (responses.get(responseKey) !== attribution) this.unknown = true; continue; }
 			responses.set(responseKey, attribution);
-			if (!counter(this.nativeTokens + r.nativeTokens!) || !time(this.elapsedMs + r.elapsedMs!) || this.elapsedMs + r.elapsedMs! > Number.MAX_SAFE_INTEGER) {
+			if (!counter(this.tokens + r.tokens!) || !time(this.elapsedMs + r.elapsedMs!) || this.elapsedMs + r.elapsedMs! > Number.MAX_SAFE_INTEGER) {
 				this.unknown = true; continue;
 			}
-			this.nativeTokens += r.nativeTokens!; this.elapsedMs += r.elapsedMs!; this.observations++;
+			this.tokens += r.tokens!; this.elapsedMs += r.elapsedMs!; this.observations++;
 		}
 		for (const op of starts.keys()) if (!ends.has(op) && !pending.has(op)) this.unknown = true;
 	}
 	get value(): number | undefined {
-		const result = this.nativeTokens * 1000 / this.elapsedMs;
+		const result = this.tokens * 1000 / this.elapsedMs;
 		return this.unknown || !this.observations || !Number.isFinite(result) ? undefined : result;
 	}
 }
@@ -210,17 +238,17 @@ export class NativeAverage {
  * disk I/O; inspect stable keys before any retry, including after exceptions.
  * A missing temporary UI manager is UNKNOWN, never a thrown lifecycle error.
  */
-export class NativeLedger {
-	average = new NativeAverage();
+export class StreamLedger {
+	average = new StreamAverage();
 	origin = "";
 	epoch = "";
 	pending = new Set<string>();
 	ready = false;
 	persistenceUnknown = false;
 	private manager: any;
-	private appendEntry: ((type: string, record: NativeRecord) => void) | undefined;
+	private appendEntry: ((type: string, record: StreamRecord) => void) | undefined;
 	private entries(): Json[] { try { return this.manager?.getEntries?.() ?? []; } catch { return []; } }
-	bind(manager: any, appendEntry: (type: string, record: NativeRecord) => void): void {
+	bind(manager: any, appendEntry: (type: string, record: StreamRecord) => void): void {
 		this.manager = manager; this.appendEntry = appendEntry;
 		try { this.origin = manager?.getSessionId?.() ?? ""; } catch { this.origin = ""; }
 		this.ready = identifier(this.origin) && typeof manager?.getEntries === "function";
@@ -229,7 +257,7 @@ export class NativeLedger {
 		if (this.ready && !this.epoch) this.reset();
 	}
 	refresh(): void { this.average.restore(this.entries(), this.origin, this.pending); }
-	private persist(record: NativeRecord): boolean {
+	private persist(record: StreamRecord): boolean {
 		if (!this.ready || !this.appendEntry) return false;
 		const existing = () => records(this.entries()).filter(r => r && recordKey(r) === recordKey(record));
 		let matches = existing();
@@ -237,7 +265,7 @@ export class NativeLedger {
 			if (matches.some(r => signature(r) !== signature(record))) this.persistenceUnknown = true;
 			return !this.persistenceUnknown;
 		}
-		try { this.appendEntry(NATIVE_ENTRY, record); }
+		try { this.appendEntry(STREAM_ENTRY, record); }
 		catch {
 			// Never append a duplicate to repair a failed disk write.
 			this.persistenceUnknown = true; matches = existing();
@@ -249,27 +277,29 @@ export class NativeLedger {
 	}
 	reset(): void {
 		this.pending.clear(); this.epoch = randomUUID(); this.persistenceUnknown = false;
-		this.persist({ v: 1, metric: NATIVE_METRIC, kind: "epoch", origin: this.origin, epoch: this.epoch }); this.refresh();
+		this.persist({ v: 1, metric: STREAM_METRIC, kind: "epoch", origin: this.origin, epoch: this.epoch }); this.refresh();
 	}
 	begin(): string | undefined {
 		if (!this.ready) return undefined;
 		const operation = hash(randomUUID()); this.pending.add(operation);
-		this.persist({ v: 1, metric: NATIVE_METRIC, kind: "start", origin: this.origin, epoch: this.epoch, operation }); this.refresh();
+		this.persist({ v: 1, metric: STREAM_METRIC, kind: "start", origin: this.origin, epoch: this.epoch, operation }); this.refresh();
 		return operation;
 	}
-	end(operation: string | undefined, observation?: Pick<NativeRecord, "responseHash" | "provider" | "api" | "model" | "nativeTokens" | "elapsedMs">): void {
+	end(operation: string | undefined, observation?: StreamObservation | "unmeasured"): void {
 		if (!operation || !this.pending.has(operation)) return;
-		const r: NativeRecord = { v: 1, metric: NATIVE_METRIC, kind: observation && !this.persistenceUnknown ? "observation" : "unknown", origin: this.origin, epoch: this.epoch, operation };
+		const kind = this.persistenceUnknown || !observation ? "unknown" : observation === "unmeasured" ? "unmeasured" : "observation";
+		const r: StreamRecord = { v: 1, metric: STREAM_METRIC, kind, origin: this.origin, epoch: this.epoch, operation };
 		if (r.kind === "observation") Object.assign(r, observation);
 		this.persist(r); this.pending.delete(operation); this.refresh();
 	}
 	get value(): number | undefined { return !this.ready || this.persistenceUnknown ? undefined : this.average.value; }
 }
 
+export type StreamObservation = Pick<StreamRecord, "responseHash" | "provider" | "api" | "model" | "tokens" | "elapsedMs">;
 type Part = { hash: ReturnType<typeof createHash>; units: number; done: boolean };
 type Item = { type: string; parts: Map<number, Part>; done: boolean; callId?: string; name?: string; namespace?: string; toolHash?: string };
 // Canonical semantic JSON is independent of whitespace/key ordering. It is
-// hashed in RAM only; never store arguments or token IDs in the native ledger.
+// hashed in RAM only; never store arguments or token IDs in the stream ledger.
 const canonicalJson = (value: any): string => {
 	if (Array.isArray(value)) return JSON.stringify(value.map(v => canonicalJson(v)));
 	if (value && typeof value === "object") return JSON.stringify(Object.keys(value).sort().map(k => [k, canonicalJson(value[k])]));
@@ -280,8 +310,8 @@ const canonicalJson = (value: any): string => {
 const DELTAS = new Map([["response.output_text.delta", "message"], ["response.function_call_arguments.delta", "function_call"], ["response.custom_tool_call_input.delta", "custom_tool_call"]]);
 const TERMINALS = new Set(["response.completed", "response.done", "response.failed", "response.incomplete", "error"]);
 export const PRECREATED_CONTROL = new Set(["rate_limits.updated", "rate_limits", "codex.rate_limits", "session.created", "session.updated", "ping", "pong", "response.queued", "response.in_progress"]);
-/** Stream identity/clock validation is shared; LIVE content validation and
- * native usage validation are NOT. Unsupported output never loses native usage.
+/** LIVE/AVG validate observed stream content. Native terminal metadata is
+ * retained separately for cache-hit display/raw diagnostics, never TPS scaling.
  */
 export class CodexMeasurement {
 	window: OutputWindow;
@@ -291,6 +321,7 @@ export class CodexMeasurement {
 	items = new Map<string, Item>();
 	invalid = false;
 	liveInvalid = false;
+	liveSuppressed = false;
 	terminal = false;
 	completed = false;
 	nativeTokens: number | undefined;
@@ -381,6 +412,7 @@ export class CodexMeasurement {
 			if (part.done) { this.rejectLive("content-after-done"); return; }
 			part.hash.update(data.delta, "utf16le"); part.units += data.delta.length; item.parts.set(index, part);
 			this.window.append(`${data.item_id}/${index}`, data.delta);
+			if (data.delta.length) this.window.content(t);
 		}
 		if (["response.output_text.done", "response.function_call_arguments.done", "response.custom_tool_call_input.done"].includes(type)) {
 			const index = type === "response.output_text.done" ? data.content_index : 0;
@@ -436,7 +468,7 @@ export class CodexMeasurement {
 		return message?.role === "assistant" && (message.responseId === undefined ? !this.completed : message.responseId === this.responseId)
 			&& message.provider === this.providerId && message.api === this.api && (message.responseModel ?? message.model) === this.model;
 	}
-	finish(message: Json): boolean {
+	private validSaved(message: Json): boolean {
 		const content: Json[] = Array.isArray(message.content) ? message.content : [];
 		const text = content.filter(p => p.type === "text").map(p => p.text ?? "").join("");
 		const tools = content.filter(p => p.type === "toolCall");
@@ -456,9 +488,19 @@ export class CodexMeasurement {
 		} catch { toolsMatch = false; }
 		return this.frozen && this.matches(message) && this.completed && !this.invalid && !this.liveInvalid && !this.window.invalid
 			&& !["error", "aborted", "length"].includes(message.stopReason) && this.liveTextHash === hash(text) && toolsMatch
-			&& this.items.size > 0 && [...this.items.values()].every(i => i.done) && this.frozenLive !== undefined;
+			&& [...this.items.values()].every(i => i.done);
 	}
-	observation(message: Json): Pick<NativeRecord, "responseHash" | "provider" | "api" | "model" | "nativeTokens" | "elapsedMs"> | undefined {
+	finish(message: Json): boolean {
+		return !this.liveSuppressed && this.validSaved(message) && this.items.size > 0 && this.frozenLive !== undefined;
+	}
+	streamObservation(message: Json): StreamObservation | "unmeasured" | undefined {
+		if (!this.validSaved(message)) return undefined;
+		const interval = this.window.streamInterval();
+		if (!interval || interval === "unmeasured") return interval;
+		return { ...interval, responseHash: hash(this.responseId!), provider: this.providerId, api: this.api, model: this.model };
+	}
+	/** Raw usage diagnostic only; NOT used by displayed AVG. */
+	observation(message: Json): { responseHash: string; provider: string; api: string; model: string; nativeTokens: number; elapsedMs: number } | undefined {
 		if (!this.frozen || !this.matches(message) || this.invalid || this.retryUnknown || this.precursorId !== undefined || !this.terminal || !this.responseId || this.nativeTokens === undefined
 			|| !time(this.fullMs) || this.fullMs <= 0 || !counter(this.priorTokens + this.nativeTokens)) return undefined;
 		// The saved normalized usage, when supplied, must still match the raw
@@ -467,7 +509,7 @@ export class CodexMeasurement {
 		if (this.completed && message.usage && message.usage.output !== this.nativeTokens) return undefined;
 		return { responseHash: hash([...this.usedResponses].join("\0")), provider: this.providerId, api: this.api, model: this.model, nativeTokens: this.priorTokens + this.nativeTokens, elapsedMs: this.fullMs };
 	}
-	current(t: number): number | undefined { return this.invalid || this.liveInvalid || this.window.invalid ? undefined : this.frozen ? this.frozenLive : this.checkpoint(t); }
+	current(t: number): number | undefined { return this.liveSuppressed || this.invalid || this.liveInvalid || this.window.invalid ? undefined : this.frozen ? this.frozenLive : this.checkpoint(t); }
 }
 
 /** Controller APIs are callable without a UI, for offline integration tests. */
@@ -475,7 +517,7 @@ export class CodexThroughput {
 	active = false;
 	measurement: CodexMeasurement | undefined;
 	input = new SessionInput();
-	ledger = new NativeLedger();
+	ledger = new StreamLedger();
 	selectedModel = "";
 	final = false;
 	finalValid = false;
@@ -489,12 +531,12 @@ export class CodexThroughput {
 	private endedMessages = new WeakSet<object>();
 	constructor(resolver: TokenizerResolver = resolveReferenceTokenizer) { this.resolver = resolver; }
 	isCodex(message: Json): boolean { return message?.api === "openai-codex-responses" || message?.provider === "openai-codex"; }
-	bindLedger(manager: any, appendEntry: (type: string, record: NativeRecord) => void): void { this.ledger.bind(manager, appendEntry); }
+	bindLedger(manager: any, appendEntry: (type: string, record: StreamRecord) => void): void { this.ledger.bind(manager, appendEntry); }
 	select(model: Json | undefined): void {
 		const key = model ? `${model.provider}/${model.id}` : "";
 		if (key !== this.selectedModel) { this.reset(); this.measurement = undefined; }
 		this.selectedModel = key; this.active = !!model && this.isCodex(model);
-		// Do not erase an in-flight/frozen native operation on model_select.
+		// Do not erase an in-flight/frozen stream operation on model_select.
 	}
 	prepare(model: Json, t: number): void {
 		this.closeUnknown(); this.discardedUntilPrepare = false; this.select(model); this.final = false; this.finalValid = false;
@@ -508,7 +550,8 @@ export class CodexThroughput {
 		if (this.discardedUntilPrepare || !this.isCodex(message)) return;
 		if (identifier(message.responseId) && this.endedResponseKeys.has(hash(`${message.provider}/${message.api}/${message.responseId}`))) return;
 		if (!this.operation) {
-			// A missing before_provider_request has no known operation duration.
+			// No pre-request duration is known; stream AVG can still measure a
+			// subsequently correlated first→last content interval.
 			this.select({ id: message.responseModel ?? message.model, provider: message.provider, api: message.api });
 			const m = new CodexMeasurement(message.responseModel ?? message.model, this.resolver);
 			this.operation = { measurement: m, id: this.ledger.begin(), frozen: false }; this.measurement = m;
@@ -524,10 +567,9 @@ export class CodexThroughput {
 	provider(data: Json, t: number, attribution?: { provider: string; api: string; model: string }): boolean {
 		if (this.discardedUntilPrepare) return false;
 		if (!this.operation && this.untrackedRequest && attribution?.api === "openai-codex-responses") {
-			// The Pi pre-request hook exposes the selected model, not a virtual
-			// route's actual provider. An unexpected Codex route must NOT silently
-			// disappear from AVG. There was no durable pre-request Codex start:
-			// record UNKNOWN coverage, without fabricating that missing boundary.
+			// The hook exposes selected rather than actual routed provider. Begin
+			// durable stream coverage here; native request duration is unknown,
+			// but subsequent first→last content timing can be observed directly.
 			const m = new CodexMeasurement(attribution.model, this.resolver); m.retryUnknown = true;
 			this.operation = { measurement: m, id: this.ledger.begin(), frozen: false }; this.measurement = m;
 			this.untrackedRequest = false; this.active = true;
@@ -559,7 +601,7 @@ export class CodexThroughput {
 		this.untrackedRequest = false; this.endedMessages.add(message);
 		if (identifier(message.responseId)) this.endedResponseKeys.add(hash(`${message.provider}/${message.api}/${message.responseId}`));
 		m.freeze(t); op.frozen = true; this.final = true;
-		// No commit at message_end: later handlers may replace the assistant.
+		// No stream commit at message_end: later handlers may replace the assistant.
 	}
 	commitSaved(messageEntryId: string, manager: any): void {
 		if (this.committedEntries.has(messageEntryId)) return;
@@ -573,7 +615,7 @@ export class CodexThroughput {
 		this.committedEntries.add(messageEntryId);
 		this.finalValid = !!message && op.measurement.finish(message);
 		if (this.finalValid && this.measurement === op.measurement) this.heldRate = op.measurement.current(0);
-		this.ledger.end(op.id, message ? op.measurement.observation(message) : undefined); this.operation = undefined;
+		this.ledger.end(op.id, message ? op.measurement.streamObservation(message) : undefined); this.operation = undefined;
 	}
 	closeUnknown(): void {
 		this.untrackedRequest = false;
@@ -583,12 +625,9 @@ export class CodexThroughput {
 	}
 	reset(): void {
 		this.heldRate = undefined; this.finalValid = false;
-		if (this.measurement) {
-			this.measurement.window.clearContent();
-			// Current-only reset cannot splice pre-reset content into a new BPE
-			// prefix. LIVE stays unknown until the next request; native survives.
-			this.measurement.window.fail("current-reset-until-next-request");
-		}
+		// Do not destroy the accumulated prefix/first-content boundary needed by
+		// independent session AVG. LIVE remains suppressed until the next request.
+		if (this.measurement) this.measurement.liveSuppressed = true;
 	}
 	resetAverage(): void {
 		// Raw WS created may precede SDK message_start. Every late event of this

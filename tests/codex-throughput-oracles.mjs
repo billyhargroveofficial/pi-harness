@@ -7,7 +7,7 @@ import {mkdtempSync, writeFileSync, rmSync} from 'node:fs';
 import {tmpdir,homedir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
-import {OutputWindow, NativeAverage, NATIVE_ENTRY, NATIVE_METRIC, hash} from '../patches/pi-live-throughput/codex-throughput.ts';
+import {OutputWindow, StreamAverage, STREAM_ENTRY, STREAM_METRIC, hash} from '../patches/pi-live-throughput/codex-throughput.ts';
 export const repo=dirname(dirname(fileURLToPath(import.meta.url)));
 const globalRoot=process.env.PI_CLI_ROOT?undefined:spawnSync('npm',['root','-g'],{encoding:'utf8'});
 if(globalRoot)assert.equal(globalRoot.status,0);
@@ -87,18 +87,18 @@ export async function operation(h,{id='r',start=0,duration=1000,output=100,texts
  if(early)await early(message);
  return {message,text,save:options=>h.save(message,options)};
 }
-export const record=(origin,epoch,kind,operation,extra={})=>({v:1,metric:NATIVE_METRIC,origin,epoch,kind,...(operation?{operation}:{}),...extra});
-export const entry=data=>({type:'custom',customType:NATIVE_ENTRY,data});
-export function nativeFixture(tokens,ms){return {responseHash:hash(`${tokens}/${ms}`),provider:model.provider,api:model.api,model:model.id,nativeTokens:tokens,elapsedMs:ms};}
+export const record=(origin,epoch,kind,operation,extra={})=>({v:1,metric:STREAM_METRIC,origin,epoch,kind,...(operation?{operation}:{}),...extra});
+export const entry=data=>({type:'custom',customType:STREAM_ENTRY,data});
+export function streamFixture(tokens,ms){return {responseHash:hash(`${tokens}/${ms}`),provider:model.provider,api:model.api,model:model.id,tokens,elapsedMs:ms};}
 
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  const suite=new Suite('independent-oracles');
  for(const text of ['<|endoftext|><|im_start|>','Русский язык и 中文 世界','😀🧑‍🚀','function foo(a){return {a:42}}'])await suite.test(`reference prefix ordinary text ${JSON.stringify(text)}`,()=>{
   const w=new OutputWindow(()=>count);for(let i=0;i<text.length;i++){w.append('p',text[i]);w.checkpoint(i*200);}w.checkpoint(text.length*200,true);assert.equal(w.tokens,count(text));
  });
- await suite.test('manual weighted sums, reasoning independent from live',()=>{
-  const origin='own',epoch='enabled';const a=new NativeAverage();
-  a.restore([entry(record(origin,epoch,'epoch')),entry(record(origin,epoch,'start','a')),entry(record(origin,epoch,'observation','a',nativeFixture(100,1000))),entry(record(origin,epoch,'start','b')),entry(record(origin,epoch,'observation','b',nativeFixture(100,10000)))],origin);
+ await suite.test('manual weighted stream sums, not arithmetic mean of TPS',()=>{
+  const origin='own',epoch='enabled';const a=new StreamAverage();
+  a.restore([entry(record(origin,epoch,'epoch')),entry(record(origin,epoch,'start','a')),entry(record(origin,epoch,'observation','a',streamFixture(100,1000))),entry(record(origin,epoch,'start','b')),entry(record(origin,epoch,'observation','b',streamFixture(100,10000)))],origin);
   close(a.value,200/11);assert.notEqual(a.value,55);
  });
  await suite.test('first atomic baseline, no hidden first-volume denominator',()=>{
