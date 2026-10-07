@@ -2,15 +2,19 @@
 // auth, settings or private sessions. Synthetic clocks are NOT network evidence.
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
+import {spawnSync} from 'node:child_process';
 import {mkdtempSync, writeFileSync, rmSync} from 'node:fs';
-import {tmpdir} from 'node:os';
+import {tmpdir,homedir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {OutputWindow, NativeAverage, NATIVE_ENTRY, NATIVE_METRIC, hash} from '../patches/pi-live-throughput/codex-throughput.ts';
 export const repo=dirname(dirname(fileURLToPath(import.meta.url)));
-export const piRoot=process.env.PI_CLI_ROOT??'/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent';
+const globalRoot=process.env.PI_CLI_ROOT?undefined:spawnSync('npm',['root','-g'],{encoding:'utf8'});
+if(globalRoot)assert.equal(globalRoot.status,0);
+export const piRoot=process.env.PI_CLI_ROOT??join(globalRoot.stdout.trim(),'@earendil-works/pi-coding-agent');
 export const installed=async path=>import(pathToFileURL(join(piRoot,path)).href);
-const require=createRequire(join(resolve(process.env.TPS_TOKENIZER_DIR??'/tmp/pi-tps-runtime-20261007'),'package.json'));
+const runtime=process.env.TPS_TOKENIZER_DIR??join(process.env.PI_CODING_AGENT_DIR??process.env.PI_AGENT_DIR??join(homedir(),'.pi/agent'),'tps-runtime');
+const require=createRequire(join(resolve(runtime),'package.json'));
 const {encode}=require('gpt-tokenizer/encoding/o200k_base');
 export const count=text=>encode(text,{allowedSpecial:new Set(),disallowedSpecial:new Set()}).length;
 export const close=(actual,expected)=>assert.ok(typeof actual==='number'&&Math.abs(actual-expected)<=1e-10*Math.max(1,Math.abs(expected)),`${actual} != ${expected}`);
