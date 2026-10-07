@@ -7,6 +7,10 @@ import { fileURLToPath } from 'node:url';
 import { homedir, tmpdir } from 'node:os';
 const repo = dirname(dirname(fileURLToPath(import.meta.url)));
 const pkg = process.env.SUBAGENTS_PACKAGE_ROOT ?? join(process.env.PI_CODING_AGENT_DIR ?? homedir() + '/.pi/agent', 'npm/node_modules/@tintinweb/pi-subagents');
+// Capture the REAL host package path before fixture HOME changes npm's prefix.
+const globalRoot = spawnSync('npm', ['root', '-g'], { encoding: 'utf8' });
+assert.equal(globalRoot.status, 0);
+const piRoot = process.env.PI_PACKAGE_ROOT ?? process.env.PI_CLI_ROOT ?? join(globalRoot.stdout.trim(), '@earendil-works/pi-coding-agent');
 const temp = mkdtempSync(join(tmpdir(), 'pi-harness-update-test-'));
 try {
   const fakeRepo = join(temp, 'repo');
@@ -58,7 +62,7 @@ fs.cpSync(process.env.MOCK_PRISTINE, process.env.MOCK_TARGET, { recursive: true 
   const agent = join(temp, 'agent');
   const home = join(temp, 'home'); mkdirSync(home);
   const target = join(agent, 'npm/node_modules/@tintinweb/pi-subagents');
-  const env = { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent, SUBAGENTS_PACKAGE_ROOT: target, MOCK_FIXTURE_ROOT: temp, MOCK_TPS_FAILURE: '0', MOCK_TARGET: target, MOCK_PRISTINE: pristine, MOCK_LOG: join(temp, 'command.json') };
+  const env = { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent, PI_PACKAGE_ROOT: piRoot, SUBAGENTS_PACKAGE_ROOT: target, MOCK_FIXTURE_ROOT: temp, MOCK_TPS_FAILURE: '0', MOCK_TARGET: target, MOCK_PRISTINE: pristine, MOCK_LOG: join(temp, 'command.json') };
   const update = (...args) => spawnSync('bash', [join(fakeRepo, 'update.sh'), ...args], { env, encoding: 'utf8', timeout: 60000 });
   const normal = update();
   assert.equal(normal.status, 0, normal.stdout + normal.stderr);
