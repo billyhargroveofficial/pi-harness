@@ -38,12 +38,12 @@ export async function harness({manager,missingTokenizer=false,extraPaths=[],cloc
  const loaded=await loadExtensions([bridge,...extraPaths],temp);assert.deepEqual(loaded.errors,[]);
  manager??=SessionManager.inMemory(temp);
  const runner=new ExtensionRunner(loaded.extensions,loaded.runtime,temp,manager,{});
- const statuses=new Map();const widgets=new Map();let footer;let selected=model;let failAppend;
- const ui={setStatus:(key,value)=>{if(value===undefined)statuses.delete(key);else statuses.set(key,value);},setWidget:(key,value)=>{if(value===undefined)widgets.delete(key);else widgets.set(key,value);},setFooter:factory=>{footer=factory?.({}, {}, {getExtensionStatuses:()=>statuses});},notify:()=>{},setTitle:()=>{},setHeader:()=>{}};
+ const statuses=new Map();const widgets=new Map();const notifications=[];let footer;let selected=model;let failAppend;
+ const ui={setStatus:(key,value)=>{if(value===undefined)statuses.delete(key);else statuses.set(key,value);},setWidget:(key,value)=>{if(value===undefined)widgets.delete(key);else widgets.set(key,value);},setFooter:factory=>{footer=factory?.({}, {}, {getExtensionStatuses:()=>statuses});},notify:(message,type)=>notifications.push({message,type}),setTitle:()=>{},setHeader:()=>{}};
  runner.setUIContext(ui,'interactive');runner.getModel=()=>selected;
  loaded.runtime.appendEntry=(type,data)=>{const result=runner.sessionManager.appendCustomEntry(type,data);if(failAppend?.(data))throw Error('injected disk failure AFTER memory append');return result;};
  const errors=[];runner.onError(error=>errors.push(error));
- const h={temp,state,loaded,runner,ui,statuses,widgets,SessionManager,
+ const h={temp,state,loaded,runner,ui,statuses,widgets,notifications,SessionManager,
   get manager(){return runner.sessionManager;},set manager(value){runner.sessionManager=value;},
   get d(){return state.controller;},get footer(){return footer;},get line(){return statuses.get('throughput')??widgets.get('throughput')?.join(' ');},
   set model(value){selected=value;},get model(){return selected;},set failAppend(value){failAppend=value;},

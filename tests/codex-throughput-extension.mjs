@@ -68,7 +68,7 @@ try{
   await session._emitExtensionEvent({type:'message_end',message:op.message});assert.equal(h.d.ledger.value,undefined);
   assert.equal(op.message.content[0].text,'final replacement fixture');const id=h.manager.appendMessage(op.message);
   await session._emitExtensionEvent({type:'turn_end',message:op.message,toolResults:[]});
-  assert.equal(h.manager.getEntry(id).message,op.message);assert.equal(h.d.ledger.value,undefined);assert.equal(h.d.ledger.average.unknown,true);assert.equal(h.d.heldRate,undefined);
+  assert.equal(h.manager.getEntry(id).message,op.message);assert.equal(h.d.ledger.value,undefined);assert.equal(h.d.ledger.average.gaps,1);assert.equal(h.d.ledger.average.unknown,false);assert.equal(h.d.heldRate,undefined);
  }));
  await suite.test('LAST held during idle/new warmup; malformed active stream cannot overwrite',()=>fixture(async h=>{
   await (await operation(h,{id:'last',duration:3000,texts:[' seed',' a'.repeat(100)],times:[1000,2000]})).save();const before=h.line;

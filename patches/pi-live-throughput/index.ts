@@ -87,17 +87,21 @@ export function createThroughputExtension(pi: ExtensionAPI, options: { resolver?
 		clearUi(); codex.sessionReset(); manager = undefined; entryCount = -1; ui = undefined; hasUI = false;
 	});
 	pi.registerCommand("throughput", {
-		description: "Hybrid LIVE/AVG TPS; session in/out. on|off|widget|status|reset|reset-avg|reset-all",
+		description: "Observed LIVE/AVG TPS; native in/out. on|off|widget|status|info|reset|reset-avg|reset-all",
 		handler: async (args, ctx) => {
 			bind(ctx); const arg = args.trim().toLowerCase();
 			if (!arg || arg === "toggle") { enabled = !enabled; clearUi(); render(); }
 			else if (arg === "on" || arg === "off") { enabled = arg === "on"; clearUi(); render(); }
 			else if (arg === "widget" || arg === "status") { mode = arg; enabled = true; clearUi(); render(); }
+			else if (arg === "info") {
+				const a = codex.ledger.average, rate = codex.ledger.value;
+				ctx.ui.notify(`AVG ${rate === undefined ? "-" : `~${rate.toFixed(1)}`} TPS по проверенным интервалам: измерено ${a.observations}, без интервала ${a.unmeasured}, пропуски/прерывания ${a.gaps}, в работе ${a.pendingOperations}. Повреждение записей: ${a.unknown || codex.ledger.persistenceUnknown ? "да" : "нет"}.`, "info"); return;
+			}
 			else if (["reset", "reset-avg", "reset-all"].includes(arg)) {
 				if (arg !== "reset-avg") codex.reset();
 				if (arg !== "reset") codex.resetAverage();
 				clearUi(); render(); ctx.ui.notify(arg === "reset" ? "LIVE reset; stream AVG and native session usage unchanged" : "New stream AVG measurement epoch; native session usage unchanged", "info"); return;
-			} else { ctx.ui.notify("Usage: /throughput [on|off|widget|status|reset|reset-avg|reset-all|toggle]", "error"); return; }
+			} else { ctx.ui.notify("Usage: /throughput [on|off|widget|status|info|reset|reset-avg|reset-all|toggle]", "error"); return; }
 			ctx.ui.notify(`Live throughput: ${enabled ? mode : "off"}`, "info");
 		},
 	});

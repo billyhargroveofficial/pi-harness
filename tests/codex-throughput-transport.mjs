@@ -97,7 +97,7 @@ try{
   assert.equal(h.line,`~${((count(f.text)-count(f.texts[0]))/2).toFixed(1)} ~${((count(f.text)-count(f.texts[0]))/1.5).toFixed(1)} TPS hit 90.0% in 1.0k out 320`);
  }));
  for(const transport of ['sse','websocket'])await suite.test(`${transport}: terminal failure with trustworthy raw usage counts despite SDK normalized zeros`,()=>fixture(async h=>{
-  const f=frames({terminal:'response.failed'});const result=await run(h,f,{transport});assert.equal(result.message.stopReason,'error');assert.equal(h.d.ledger.value,undefined);assert.equal(h.d.ledger.average.unknown,true);
+  const f=frames({terminal:'response.failed'});const result=await run(h,f,{transport});assert.equal(result.message.stopReason,'error');assert.equal(h.d.ledger.value,undefined);assert.equal(h.d.ledger.average.gaps,1);assert.equal(h.d.ledger.average.unknown,false);
  }));
  await suite.test('SSE: missing native total does not invalidate observed stream AVG',()=>fixture(async h=>{
   const f=frames({output:null});const result=await run(h,f,{});assert.equal(result.message.usage.output,0);close(h.d.ledger.value,(count(f.text)-count(f.texts[0]))/1.5);assert.equal(h.d.ledger.average.unknown,false);
@@ -117,7 +117,7 @@ try{
  await suite.test('SSE: buffered malformed content-before-created poisons coverage, not held LAST',()=>fixture(async h=>{
   await run(h,frames({id:'good'}));const held=h.d.heldRate;
   const f=frames({id:'bad'});f.list.unshift({t:50,data:{type:'response.output_text.delta',item_id:'no-item',content_index:0,delta:'bad'}});f.list.forEach((frame,i)=>frame.data.sequence_number=i);
-  await run(h,f,{buffered:true,base:10000});assert.equal(h.d.ledger.average.unknown,true);close(h.d.heldRate,held);
+  await run(h,f,{buffered:true,base:10000});assert.equal(h.d.ledger.average.gaps,1);assert.equal(h.d.ledger.average.unknown,false);close(h.d.heldRate,held);close(h.d.ledger.value,(count(frames().text)-count(frames().texts[0]))/1.5);
  }));
  await suite.test('real scheduled ReadableStream + slow ExtensionRunner neighbor, no clock mutation in hooks',async()=>{
   const epoch=performance.now();const clock=()=>performance.now()-epoch;
@@ -169,7 +169,7 @@ try{
  }));
  await suite.test('actual SSE error without turn_end becomes durable UNKNOWN at settle',()=>fixture(async h=>{
   await run(h,frames({terminal:'response.failed'}),{missingEnd:true});assert.equal(h.d.ledger.value,undefined);
-  await h.emit('agent_before_settle');assert.equal(h.d.ledger.average.unknown,true);assert.equal(h.manager.getEntries().at(-1).data.kind,'unknown');
+  await h.emit('agent_before_settle');assert.equal(h.d.ledger.average.gaps,1);assert.equal(h.d.ledger.average.unknown,false);assert.equal(h.manager.getEntries().at(-1).data.kind,'unknown');
  }));
 }finally{
  closeOpenAICodexWebSocketSessions();globalThis.fetch=oldFetch;globalThis.WebSocket=oldSocket;

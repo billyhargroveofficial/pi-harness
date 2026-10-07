@@ -17,4 +17,4 @@ bash "$REPO_DIR/assets/install-tps-runtime.sh" --stage "$STAGE_PARENT/runtime"
 # Every core/oracle/extension/native-session/transport acceptance and loader
 # check runs inside verification: any failure rolls back the whole set.
 node "$PATCH" --deploy --runtime-stage="$STAGE_PARENT/runtime" --verify
-echo 'TPS display deployed and installed sources verified. LIVE and AVG measure reference-BPE stream delivery. Old native AVG records are ignored; new stream epoch begins on reload. No processes restarted.'
+echo 'TPS display deployed and installed sources verified. LIVE/AVG measure reference-BPE stream delivery. Reload restores valid stream AVG despite isolated gaps; old native AVG records are ignored. No processes restarted.'

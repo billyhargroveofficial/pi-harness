@@ -155,7 +155,7 @@ export class OutputWindow {
 }
 
 // Deliberately NEW namespace: old native request durations cannot be migrated
-// into observed-stream time. Reload starts a clean, honest measurement epoch.
+// into stream time. First migration creates a stream epoch; reload restores it.
 export const STREAM_ENTRY = "pi-harness:codex-stream-throughput";
 export const STREAM_METRIC = "reference-stream-delivery";
 export type StreamRecord = {
@@ -173,18 +173,24 @@ const validRecord = (r: Json): boolean => !!r && r.v === 1 && r.metric === STREA
 	&& (r.kind !== "observation" || (identifier(r.responseHash) && identifier(r.provider) && identifier(r.api) && identifier(r.model)
 		&& counter(r.tokens) && time(r.elapsedMs) && r.elapsedMs >= POLICY.minSpanMs && r.elapsedMs <= Number.MAX_SAFE_INTEGER));
 
-/** Ratio of measured stream-prefix differences to first→last content time.
- * Own branches/models only; pending/known untimed streams add neither time nor
- * tokens. Native request records are NEVER reinterpreted as stream intervals.
+/** Ratio of validated measured stream intervals, NOT a full-coverage promise.
+ * Own branches/models only. Untimed/aborted/missing intervals add neither tokens
+ * nor time; gaps remain explicit diagnostics rather than permanently blanking
+ * unrelated valid observations. Corrupt/conflicting numerical records still
+ * fail closed. Native request records are NEVER reinterpreted as stream time.
  */
 export class StreamAverage {
 	epoch: string | undefined;
 	tokens = 0;
 	elapsedMs = 0;
-	unknown = false;
+	unknown = false; // Structural corruption, NOT an isolated unmeasured request.
 	observations = 0;
+	gaps = 0;
+	unmeasured = 0;
+	pendingOperations = 0;
 	restore(entries: Json[], origin: string, pending = new Set<string>()): void {
 		this.epoch = undefined; this.tokens = 0; this.elapsedMs = 0; this.unknown = false; this.observations = 0;
+		this.gaps = 0; this.unmeasured = 0; this.pendingOperations = 0;
 		const source = records(entries), own = source.filter(r => r?.origin === origin);
 		let markerIndex = -1;
 		const markers = new Set<string>();
@@ -215,8 +221,9 @@ export class StreamAverage {
 		}
 		const responses = new Map<string, string>();
 		for (const [op, r] of ends) {
-			if (!starts.has(op) || r.kind === "unknown") { this.unknown = true; continue; }
-			if (r.kind === "unmeasured") continue;
+			if (!starts.has(op)) { this.unknown = true; continue; }
+			if (r.kind === "unknown") { this.gaps++; continue; }
+			if (r.kind === "unmeasured") { this.unmeasured++; continue; }
 			const responseKey = `${r.provider}/${r.responseHash}`;
 			const attribution = signature({ tokens: r.tokens, elapsedMs: r.elapsedMs, provider: r.provider, api: r.api, model: r.model });
 			if (responses.has(responseKey)) { if (responses.get(responseKey) !== attribution) this.unknown = true; continue; }
@@ -226,7 +233,10 @@ export class StreamAverage {
 			}
 			this.tokens += r.tokens!; this.elapsedMs += r.elapsedMs!; this.observations++;
 		}
-		for (const op of starts.keys()) if (!ends.has(op) && !pending.has(op)) this.unknown = true;
+		for (const op of starts.keys()) if (!ends.has(op)) {
+			if (pending.has(op)) this.pendingOperations++;
+			else this.gaps++; // Crash/reload gap cannot erase independently valid sums.
+		}
 	}
 	get value(): number | undefined {
 		const result = this.tokens * 1000 / this.elapsedMs;

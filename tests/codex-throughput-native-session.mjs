@@ -48,13 +48,13 @@ try{
   await (await operation(h,{output:320,usageDetails:{reasoning_tokens:320}})).save();assert.equal(h.d.ledger.value,undefined);assert.equal(h.d.ledger.average.unknown,false);assert.equal(h.d.input.outputTokens,320);
  }));
  for(const options of [{missingTokenizer:true},{unsupported:true},{texts:['a','b'.repeat(256*1024)],times:[100,1100]}])await suite.test(`unobservable stream fails closed: ${Object.keys(options)}`,()=>fixture(async h=>{
-  await (await measured(h,options)).save();assert.equal(h.d.ledger.value,undefined);assert.equal(h.d.ledger.average.unknown,true);assert.equal(h.d.measurement.window.parts.size,0);assert.equal(h.d.input.outputTokens,100);
+  await (await measured(h,options)).save();assert.equal(h.d.ledger.value,undefined);assert.equal(h.d.ledger.average.gaps,1);assert.equal(h.d.ledger.average.unknown,false);assert.equal(h.d.measurement.window.parts.size,0);assert.equal(h.d.input.outputTokens,100);
  },options));
  for(const terminalType of ['response.failed','response.incomplete','error'])await suite.test(`unvalidated terminal ${terminalType} cannot commit successful-stream AVG`,()=>fixture(async h=>{
-  await (await measured(h,{terminalType})).save();assert.equal(h.d.ledger.value,undefined);assert.equal(h.d.ledger.average.unknown,true);
+  await (await measured(h,{terminalType})).save();assert.equal(h.d.ledger.value,undefined);assert.equal(h.d.ledger.average.gaps,1);assert.equal(h.d.ledger.average.unknown,false);
  }));
  for(const replacement of [m=>({...m,content:[{type:'text',text:'replacement'}]}),m=>({...m,responseId:'other'})])await suite.test('actual final saved replacement invalidates measured stream, not native accounting',()=>fixture(async h=>{
-  const op=await measured(h);await op.save({replacement});assert.equal(h.d.ledger.value,undefined);assert.equal(h.d.ledger.average.unknown,true);assert.equal(h.d.input.outputTokens,100);assert.equal(h.d.heldRate,undefined);
+  const op=await measured(h);await op.save({replacement});assert.equal(h.d.ledger.value,undefined);assert.equal(h.d.ledger.average.gaps,1);assert.equal(h.d.ledger.average.unknown,false);assert.equal(h.d.input.outputTokens,100);assert.equal(h.d.heldRate,undefined);
  }));
  await suite.test('duplicate end/turn boundaries idempotent',()=>fixture(async h=>{
   const op=await measured(h);const saved=await op.save();await h.runner.emitMessageEnd({type:'message_end',message:saved.message});
@@ -106,7 +106,7 @@ try{
    const manager=SessionManager.create(temp,join(temp,'sessions'));manager.appendMessage(assistant('legacy','historical fixture',500));
    const origin=manager.getSessionId();manager.appendCustomEntry('pi-harness:codex-native-throughput',{v:1,metric:'native-provider-operation',kind:'epoch',origin,epoch:'old'});
    let h=await harness({manager});assert.notEqual(h.d.ledger.epoch,'old');assert.equal(h.d.ledger.value,undefined);assert.equal(h.d.input.outputTokens,500);
-   await (await measured(h)).save();await h.emit('before_provider_request',{},10000);const reloaded=SessionManager.open(manager.getSessionFile(),join(temp,'sessions'));await h.dispose();h=await harness({manager:reloaded});assert.equal(h.d.ledger.average.unknown,true);
+   await (await measured(h)).save();await h.emit('before_provider_request',{},10000);const reloaded=SessionManager.open(manager.getSessionFile(),join(temp,'sessions'));await h.dispose();h=await harness({manager:reloaded});assert.equal(h.d.ledger.average.gaps,1);assert.equal(h.d.ledger.average.unknown,false);close(h.d.ledger.value,100);
    await h.command('reset-avg');await (await measured(h,{id:'fresh',start:20000})).save();close(h.d.ledger.value,100);
    const allowed=new Set(['v','metric','kind','origin','epoch','operation','responseHash','provider','api','model','tokens','elapsedMs']);
    const persisted=readFileSync(h.manager.getSessionFile(),'utf8').split('\n').filter(Boolean).map(JSON.parse);assert.ok(persisted.some(e=>e.customType==='pi-harness:codex-native-throughput'));
@@ -114,7 +114,7 @@ try{
    assert.ok(!JSON.stringify(persisted.filter(e=>e.customType===STREAM_ENTRY)).includes('historical fixture'));await h.dispose();
   }finally{rmSync(temp,{recursive:true,force:true});}
  });
- await suite.test('shutdown/abort without final saved boundary closes UNKNOWN',()=>fixture(async h=>{await h.emit('before_provider_request',{},0);await h.emit('agent_before_settle',{},1000);assert.equal(h.d.ledger.average.unknown,true);}));
+ await suite.test('shutdown/abort without final saved boundary records isolated gap',()=>fixture(async h=>{await h.emit('before_provider_request',{},0);await h.emit('agent_before_settle',{},1000);assert.equal(h.d.ledger.average.gaps,1);assert.equal(h.d.ledger.average.unknown,false);}));
  await suite.test('append after-memory exception never duplicate bills',()=>fixture(async h=>{
   let n=0;h.failAppend=data=>{if(data.kind==='observation'){n++;return true;}return false;};const op=await measured(h);const saved=await op.save();await h.emit('turn_end',{messageEntryId:saved.id});assert.equal(n,1);assert.equal(h.d.ledger.value,undefined);
  }));
@@ -127,6 +127,21 @@ try{
   a.restore([entry(record(origin,epoch,'epoch')),start('a'),obs('a',Number.MAX_SAFE_INTEGER,1000),start('b'),obs('b',1,1000)],origin);assert.equal(a.value,undefined);
   a.restore([entry(record(origin,epoch,'epoch')),start('a'),obs('a',100,1000),start('b'),obs('b',200,1000,{responseHash:hash('100/1000')})],origin);assert.equal(a.value,undefined);
  });
+ await suite.test('first aborted real request cannot blank all later good AVG; reload/compaction preserve partial coverage',()=>fixture(async h=>{
+  await h.emit('before_provider_request',{},0);const abort={...assistant('abort'),responseId:undefined,stopReason:'aborted',content:[]};await h.save(abort);
+  assert.equal(h.d.ledger.average.gaps,1);assert.equal(h.d.ledger.value,undefined);
+  const first=await (await measured(h,{id:'valid-after-abort',start:10000})).save();close(h.d.ledger.value,100);assert.match(h.line,/ ~100\.0 TPS/);
+  await h.emit('before_provider_request',{},20000);await h.emit('agent_before_settle',{},21000);close(h.d.ledger.value,100);assert.equal(h.d.ledger.average.gaps,2);
+  const changed=await measured(h,{id:'replaced',start:30000});await changed.save({replacement:m=>({...m,content:[{type:'text',text:'replacement'}]})});close(h.d.ledger.value,100);assert.equal(h.d.ledger.average.gaps,3);
+  await (await measured(h,{id:'second-valid',start:40000,texts:[' seed',' a'.repeat(300)]})).save();close(h.d.ledger.value,200);
+  h.manager.appendCompaction('offline summary',first.id,4000);await h.emit('session_compact');close(h.d.ledger.value,200);
+  await h.emit('session_shutdown');await h.emit('session_start');close(h.d.ledger.value,200);assert.equal(h.d.ledger.average.gaps,3);assert.equal(h.d.ledger.average.unknown,false);
+ }));
+ await suite.test('diagnostic info exposes measured/untimed/gaps/pending without toggling display',()=>fixture(async h=>{
+  await (await measured(h,{id:'valid'})).save();await h.emit('before_provider_request',{},10000);await h.emit('agent_before_settle',{},11000);
+  await (await operation(h,{id:'untimed',start:20000})).save();await h.emit('before_provider_request',{},30000);
+  const before=h.line;await h.command('info');const message=h.notifications.at(-1).message;assert.equal(h.line,before);assert.match(message,/AVG ~100\.0 TPS/);assert.match(message,/измерено 1, без интервала 1, пропуски\/прерывания 1, в работе 1/);assert.match(message,/Повреждение записей: нет/);
+ }));
  await suite.test('tool input stream: canonical saved arguments/identity checked, native out preserved',()=>fixture(async h=>{
   await h.emit('before_provider_request',{},0);await h.raw({type:'response.created',response:{id:'tool'}},0);
   const tool={id:'f',type:'function_call',call_id:'call',name:'fn'};await h.raw({type:'response.output_item.added',item:tool},0);

@@ -24,18 +24,21 @@ request AVG. После живых примеров `~34.4 ~12.9 TPS` и `~37.1 
 - Reset LIVE не уничтожает ongoing prefix/time AVG. Reset AVG изолирует inflight
   ответ до следующего pre-request, включая deferred WS message_start.
 - Финальное содержимое проверяется после saved-message replacement handlers.
-  Unknown coverage не скрывается; crash/duplicates/fork/model/tree безопасны.
+  Отдельный неизвестный/прерванный ответ — coverage gap, не запрет всей AVG.
+  Проверенные измерения сохраняются и после abort/Esc/reload/crash; `/throughput info`
+  показывает gaps/unmeasured/pending. Повреждение числовых records fail closed.
+  Crash/duplicates/fork/model/tree безопасны.
 - UI: `~32.2 ~45.5 TPS`, один suffix, без новых подписей. Footer/theme/OAuth и
   native session usage не менять; inference/перезапуск сервисов не нужен.
 
 ## Реализация и проверки
 
 Canonical `patches/pi-live-throughput/`; guarded feature deployment
-`assets/deploy-tps-speedometer.sh`. Известный c6faee7 разрешён как предшественник;
+`assets/deploy-tps-speedometer.sh`. c6faee7/51868d0 разрешены как предшественники;
 runtime/overlay/canonical copies меняются одной rollback-транзакцией.
 
-Тесты: 99 unit/math/controller + 600 replays, 8 независимых oracle, 15 real
-footer/loader guards, 36 real SessionManager stream lifecycle, 17 subscription
+Тесты: 103 unit/math/controller + 600 replays, 8 независимых oracle, 15 real
+footer/loader guards, 38 real SessionManager stream lifecycle, 17 subscription
 SSE/WS transport, 46 TEMP-only deploy/rollback checks. Дополнительные preserved
 регрессии: native in/out, statusline, portable config, Codex-only, compact tools,
 subagents updater/live tools, session manager и Orca Math.

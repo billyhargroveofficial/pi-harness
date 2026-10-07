@@ -31,15 +31,24 @@ node tests/codex-throughput-deploy.mjs
 но LIVE — rolling window, AVG — постоянный first→last content interval ответа.
 Native request durations больше не являются AVG.
 
-Unit/controller — **99 PASS + 600 mathematical replays**, независимые oracle —
+Unit/controller — **103 PASS + 600 mathematical replays**, независимые oracle —
 **8 PASS**, loader/footer/guards — **15 PASS**, actual SessionManager/saved-boundary —
-**36 PASS**, subscription SSE/WebSocket — **17 PASS**, runtime/deploy — **46 PASS**.
-Итого **221 checks + 600 replays**. Fixtures запрещают inference/реальную авторизацию.
+**38 PASS**, subscription SSE/WebSocket — **17 PASS**, runtime/deploy — **46 PASS**.
+Итого **227 checks + 600 replays**. Fixtures запрещают inference/реальную авторизацию.
 
 Exact fixture даёт `~32.2 ~45.5 TPS`: весь поток 455 reference-токенов /10s,
 последний rolling участок 161/5s. Native output 999999 не меняет оба TPS.
 Weighted `100/1s +100/10s` = **200/11**, не55. Native output 320 (reasoning300)
 сохраняет `out=320`, но не увеличивает наблюдаемый numerator.
+
+Регрессия постоянного прочерка: первый Abort/Esc прежде выставлял global unknown,
+хотя после него сохранялись валидные observations. Теперь отдельные unknown и
+unclosed starts — explicit gaps; AVG по проверенным интервалам восстанавливается
+без reset и без записи в реальные session files. Обезличенный weighted oracle:
+`86/2.6073s +51/1.0940s +100/2.4037s` → `~38.8`. Actual runner проверяет first abort
+→ good → abort → replacement → good → compaction/reload, сохранённые суммы и
+`/throughput info` с counts gaps. Повреждённые/conflicting numeric records и
+overflow по-прежнему дают `-`.
 
 AVG не включает TTFT, terminal/done/save tail, user/tool idle. Проверены крупный
 first atomic prefix и его согласованное исключение, first/last timestamps между

@@ -76,18 +76,26 @@ ID/name/namespace и semantic arguments/input. Freeze в `message_end`; commit
 только по `turn_end.messageEntryId/getEntry` после всех replacement handlers.
 Замена сохранённого текста/tool call не может подтвердить AVG другого содержимого.
 
-Ошибки корреляции/clock, missing runtime, превышение общего RAM-предела 256 Ki
-UTF-16 units, unsupported content, failed/incomplete output, неполная saved
-boundary или conflicting records дают **unknown**, а не тихий пропуск плохого
-наблюдения. Пустое, но корректно завершённое untimed output — отдельный unmeasured.
-Content только в RAM и очищается после freeze/закрытия операции.
+Ошибки корреляции/clock, missing runtime, превышение RAM-предела 256 Ki UTF-16
+units, unsupported/failed/incomplete output или неполная saved boundary дают
+**unknown конкретного ответа**. Это явный coverage gap, не нулевой numerator,
+не выдуманная длительность и **не запрет AVG всех остальных валидных интервалов**.
+Abort/Esc или crash gap не могут навсегда отравить всю эпоху. AVG остаётся средним
+проверенных интервалов, а не обещанием полного покрытия; `/throughput info`
+показывает counts measured/unmeasured/gaps/pending. При отсутствии измерений — `-`.
+
+Повреждённые числовые records, missing-start observations, конфликтующие duplicates,
+переполнение и непроверенная запись после I/O failure по-прежнему fail closed — `-`.
+Пустое корректно завершённое untimed output — отдельный unmeasured. Content только
+в RAM и очищается после freeze/закрытия операции.
 
 ## Сессия, миграция и команды
 
 Используется НОВЫЙ namespace `pi-harness:codex-stream-throughput` и metric
 `reference-stream-delivery`. **Старые native AVG records не пересчитываются**:
 из них нельзя восстановить первый/последний content timestamp. Они сохраняются
-в истории, но игнорируются новым счётчиком. После `/reload` начинается новая эпоха.
+в истории, но игнорируются новым счётчиком. Первый переход с native-версии через
+`/reload` создаёт stream эпоху; последующие reload восстанавливают её измерения.
 
 `pi.appendEntry` хранит version/metric/epoch, start/observation/unmeasured/unknown,
 own origin, hashed operation/response, actual provider/api/model, `tokens` и
@@ -96,18 +104,22 @@ monotonic timestamps. Custom records не входят в контекст мо�
 
 Reload/resume/tree/compaction восстанавливают измеренные own-session branches
 и модели; foreign inherited fork/child записи не смешиваются. Unclosed start
-после crash или конфликт duplicates → AVG `-`; replay marker не отменяет reset.
+после crash → coverage gap; существующие валидные суммы сохраняются. Конфликт
+числовых duplicates → AVG `-`; replay marker не отменяет reset. Прежние unknown
+records тоже восстанавливаются как gaps, без reset/перезаписи истории.
 
 ```text
 /throughput on|off|widget|status
+/throughput info        # measured/unmeasured/gaps/pending; не переключает UI
 /throughput reset       # только LIVE; ongoing AVG prefix и native in/out сохранены
 /throughput reset-avg   # новая эпоха stream AVG
 /throughput reset-all   # LIVE + новая эпоха stream AVG; native usage сохранён
 ```
 
 AVG reset отбрасывает уже начатый ответ, включая поздний SDK start после WS
-created. Следующий реальный pre-request разрешает новые измерения. При unknown
-можно начать новую эпоху `reset-avg`; пропущенное время не восстанавливается.
+created. Следующий реальный pre-request разрешает новые измерения. Для обычных
+прерываний reset больше не нужен; новую эпоху можно начать вручную, например
+после повреждения records. Пропущенное время не восстанавливается.
 Вне Codex — `- - TPS`. Footer/status/widget, цвет и переносы не меняются.
 
 ## Установка и проверка
@@ -127,11 +139,11 @@ node tests/codex-throughput-deploy.mjs
 
 Guarded feature-only deploy обновляет runtime/source/canonical copies одной
 транзакцией с rollback, всеми installed-byte acceptance suites и real-loader
-smoke. Принимает проверенный предшественник c6faee7, не неизвестные local edits.
+smoke. Принимает проверенные предшественники c6faee7/51868d0, не неизвестные local edits.
 Не меняет models/settings/OAuth/тему/statusline.py, не обновляет Pi/npm extensions,
 не перезапускает процессы. Действующая Pi подхватывает код через `/reload`.
 
-221 проверка + 600 mathematical schedule replays: actual Pi loader, runner,
+227 проверок + 600 mathematical schedule replays: actual Pi loader, runner,
 SessionManager/AgentSession final-save boundary, SSE parser и native WS queue,
 first/last/timers, weighted AVG, migration/crash/reset/fork, reference BPE,
 footer widths 1–220 и deployment rollback. Fixtures — без inference/auth.
