@@ -18,6 +18,14 @@ hosted web_search через pi-openai-toolkit. Не включай isolated: tr
 Не устанавливай dynamic-workflow и watcher. Не отправляй внешние сообщения без
 прямой просьбы. Не записывай память без прямой просьбы.
 
-## Брат — хост `flyingkuskus`, его папка `/home/flyingkuskus`
+## Брат SSH — хост `flyingkuskus`, его папка `/home/flyingkuskus`
 
-Машина брата — Arch Linux, хост `flyingkuskus`, пользователь `flyingkuskus`; его файлы и проекты лежат в `/home/flyingkuskus`. Он в своём tailnet `taileaee11.ts.net` (аккаунт `morphinethings@`), Mac Billy — в другом (`tail856bc0.ts.net`), поэтому прямой `ssh flyingkuskus@flyingkuskus.taileaee11.ts.net` по Tailscale висит на banner exchange. Рабочий проверенный путь — алиас `ssh brother` в `~/.ssh/config`: Tailscale Funnel TLS на :443 через `openssl s_client`, host key уже в `known_hosts`; `scp`/`sftp` через тот же алиас работают. Адрес внутри его tailnet — `100.92.120.101`; снаружи открыты Funnel `https://flyingkuskus.taileaee11.ts.net:8443` и `:10000`.
+Машина брата — Arch Linux x86_64; хост и пользователь `flyingkuskus`, проекты в `/home/flyingkuskus`.
+
+Основной проверенный 7 октября 2026 доступ — **`ssh brother-direct`** (синоним `brother-chisel`). Алиас подключается к `127.0.0.1:2222` на Mac, использует `~/.ssh/id_ed25519`, `HostKeyAlias flyingkuskus.taileaee11.ts.net` и `StrictHostKeyChecking yes`. Проверку ключей не отключать.
+
+Канал: Chisel на Arch → `https://billyhargrove.ru/_brother-ssh` → Caddy на Mac → Chisel-server `127.0.0.1:18081`. Обратный listener — только `127.0.0.1:2222`, цель — `127.0.0.1:22` на Arch; не публиковать SSH на всех интерфейсах. Mac LaunchAgent — `ru.billyhargrove.brother-tunnel`; Arch service — `brother-tunnel.service`. Приватные инструкции Mac — `~/.config/brother-tunnel/README.md`, секрет Arch — `/etc/brother-tunnel/client.env`. AUTH, пароли и приватные ключи в отчёты/репозиторий не копировать. Pi/Orca/Node gateway/Caddy ради обновления харнесса не перезапускать.
+
+Доступ требует включённых компьютеров и работающей сети; не обещать безусловный uptime. Братскую тему `terracotta-local-*`, OAuth, личные настройки и symlink `~/.pi/agent/AGENTS.md` → `~/.codex/AGENTS.md` сохранять; обновления харнесса выполнять точечно, не запускать полный установщик поверх его конфигурации.
+
+Резерв — **`ssh brother`**, прежний Tailscale Funnel TLS :443 через `openssl s_client`; не удалять и не подменять. Брат в `taileaee11.ts.net`, Mac Billy в `tail856bc0.ts.net`; Tailscale-IP брата `100.92.120.101`. Прямой SSH между tailnet ранее зависал на banner exchange; причина не установлена. Funnel-адреса: `https://flyingkuskus.taileaee11.ts.net:8443` и `:10000`.
