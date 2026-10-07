@@ -1,147 +1,115 @@
-// Actual Pi loader + native SSE parser + status footer, entirely offline.
+// Independent hybrid UI/real-loader acceptance + TEMP-only transactional guards.
+// No HOME deployment, settings/theme changes, auth/session reads or inference.
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-const repo = dirname(dirname(fileURLToPath(import.meta.url)));
-const agentDir = process.env.PI_CODING_AGENT_DIR ?? process.env.PI_AGENT_DIR ?? join(homedir(), '.pi/agent');
-const source = process.env.THROUGHPUT_SOURCE ?? join(repo,'patches/pi-live-throughput/index.ts');
-const globalRoot=spawnSync('npm',['root','-g'],{encoding:'utf8'});assert.equal(globalRoot.status,0);
-const piRoot=process.env.PI_CLI_ROOT??join(globalRoot.stdout.trim(),'@earendil-works/pi-coding-agent');
-const {loadExtensions}=await import(pathToFileURL(join(piRoot,'dist/core/extensions/loader.js')).href);
-const savedFetch=globalThis.fetch;globalThis.fetch=()=>{throw new Error('Network disabled in TPS tests');};
-const temp=mkdtempSync(join(tmpdir(),'safe-throughput-'));
-let clock=0;const descriptor=Object.getOwnPropertyDescriptor(performance,'now');
-Object.defineProperty(performance,'now',{value:()=>clock,configurable:true});
-try {
- const loaded=await loadExtensions([source],temp);assert.deepEqual(loaded.errors,[]);const ext=loaded.extensions[0];
- let line;let footer;const statuses=new Map();
- const ctx={hasUI:true,model:{api:'openai-codex-responses',provider:'openai-codex',id:'test'},ui:{
-  setWidget:(_key,lines)=>{if(lines)line=lines.join(' ');},
-  setStatus:(key,value)=>{if(value){line=value;statuses.set(key,value);}else statuses.delete(key);},
-  setFooter:factory=>{footer=factory?.({}, {}, {getExtensionStatuses:()=>statuses});},notify:()=>{},
- }};
- const emit=async(type,event={})=>{for(const handler of ext.handlers.get(type)??[])await handler({type,...event},ctx);};
- const command=ext.commands.get('throughput');assert.ok(command);
- let seq=0;
- const raw=async(type,data,t)=>{clock=t;await emit('provider_stream_event',{api:ctx.model.api,provider:ctx.model.provider,model:ctx.model.id,data:{type,sequence_number:seq++,...data}});};
- const base={role:'assistant',api:ctx.model.api,provider:ctx.model.provider,model:'test',content:[],usage:{input:0,cacheRead:0,cacheWrite:0,output:0}};
- await emit('session_start');await emit('before_provider_request');
- await raw('response.created',{response:{id:'r'}},100);await emit('message_start',{message:base});
- assert.equal(line,'- TPS hit - in 0 out 0');
- await raw('response.output_item.added',{item:{id:'m',type:'message'}},1000);
- let text='';for(let i=0;i<4;i++){const delta='abcd'.repeat(10);text+=delta;await raw('response.output_text.delta',{item_id:'m',content_index:0,delta},2000+i*500);}
- assert.equal(line,'~20.0 TPS hit - in 0 out 0');
- clock=99000;await command.handler('status',ctx);assert.match(line,/^~20.0 TPS/,'in-flight idle keeps last safe observation');
- await raw('response.output_text.done',{item_id:'m',content_index:0,text},100000);
- await raw('response.output_item.done',{item:{id:'m',type:'message',content:[{type:'output_text',text}]}},101000);
- await raw('response.completed',{response:{id:'r',status:'completed',usage:{input_tokens:1000,input_tokens_details:{cached_tokens:900},output_tokens:100000,output_tokens_details:{reasoning_tokens:0}}}},102000);
- const final={...base,responseId:'r',stopReason:'stop',content:[{type:'text',text}],usage:{input:100,cacheRead:900,cacheWrite:0,output:100000}};
- await emit('message_end',{message:final});assert.equal(line,'~20.0 TPS hit 90.0% in 1.0k out 100k','no native usage rescaling');
- const finalLine=line;await emit('message_end',{message:final});assert.equal(line,finalLine,'duplicate end no usage double count');
- clock=200000;await command.handler('widget',ctx);assert.equal(line,finalLine,'completed rate is last response, not live zero');
- await command.handler('status',ctx);await emit('before_provider_request');assert.match(line,/^~20.0 TPS/,'new request warmup keeps previous validated rate');
- seq=0;await raw('response.created',{response:{id:'next'}},210000);await emit('message_start',{message:base});
- await command.handler('reset',ctx);assert.match(line,/- TPS hit 90.0% in 1.0k out 100k/,'reset keeps billing counters');
- await command.handler('off',ctx);assert.equal(statuses.has('throughput'),false);
- await command.handler('on',ctx);assert.equal(statuses.has('throughput'),true);
- await emit('session_shutdown');
- // Real installed native SSE parser with local fetch and generated dummy JWT.
- const {stream}=await import(pathToFileURL(join(piRoot,'node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js')).href);
- const model={api:'openai-codex-responses',provider:'openai-codex',id:'gpt-6.1-sol',name:'offline fixture',baseUrl:'https://chatgpt.com/backend-api',reasoning:true,input:['text'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:272000,maxTokens:1000};
- ctx.model=model;clock=0;await emit('session_start');
- const chunks=Array(4).fill('text'.repeat(10));const full=chunks.join('');
- const frames=[
-  {type:'response.created',response:{id:'native_fixture'}},
-  {type:'response.output_item.added',output_index:0,item:{type:'reasoning',id:'thinking',summary:[]}},
-  {type:'response.reasoning_summary_text.delta',item_id:'thinking',output_index:0,summary_index:0,delta:'not visible output'},
-  {type:'response.output_item.done',output_index:0,item:{type:'reasoning',id:'thinking',summary:[]}},
-  {type:'response.output_item.added',output_index:1,item:{type:'message',role:'assistant',id:'msg',content:[]}},
-  {type:'response.content_part.added',item_id:'msg',output_index:1,content_index:0,part:{type:'output_text',text:''}},
-  ...chunks.map(delta=>({type:'response.output_text.delta',item_id:'msg',output_index:1,content_index:0,delta})),
-  {type:'response.output_text.done',item_id:'msg',output_index:1,content_index:0,text:full},
-  {type:'response.output_item.done',output_index:1,item:{type:'message',role:'assistant',id:'msg',content:[{type:'output_text',text:full}]}},
-  {type:'response.completed',response:{id:'native_fixture',status:'completed',model:model.id,usage:{input_tokens:100,input_tokens_details:{cached_tokens:0},output_tokens:320,output_tokens_details:{reasoning_tokens:300}}}},
- ].map((event,sequence_number)=>({...event,sequence_number}));
- const body=frames.map(event=>`data: ${JSON.stringify(event)}\n\n`).join('');
- const jwt=['{}',JSON.stringify({'https://api.openai.com/auth':{chatgpt_account_id:'offline-fixture'}}),'dummy'].map(x=>Buffer.from(x).toString('base64url')).join('.');
- let fetchCalls=0,deltas=0;
- const response=stream(model,{messages:[{role:'user',content:[{type:'text',text:'offline fixture'}],timestamp:0}]},{apiKey:jwt,transport:'sse',maxRetries:0,
-  fetch:async()=>{fetchCalls++;return new Response(body,{headers:{'content-type':'text/event-stream'}});},
-  onPayload:async()=>{await emit('before_provider_request');},
-  onProviderStreamEvent:async data=>{if(data.type==='response.output_text.delta')clock=1000+(++deltas)*500;else clock++;await emit('provider_stream_event',{api:model.api,provider:model.provider,model:model.id,data});},
- });
- for await(const event of response){if(event.type==='start')await emit('message_start',{message:event.partial});else if(['done','error'].includes(event.type))await emit('message_end',{message:await response.result()});else await emit('message_update',{message:event.partial,assistantMessageEvent:event});}
- assert.equal(fetchCalls,1);assert.equal(line,'~20.0 TPS hit 0.0% in 100 out 320');
- // Legacy command bullets also become middle dots without rerunning Python.
- const uiSource=process.env.STATUSLINE_UI_SOURCE??join(repo,'patches/pi-live-throughput/statusline-ui.ts');
- const bridge=join(temp,'footer.ts');writeFileSync(bridge,`import {applyStatusLineUi} from ${JSON.stringify(uiSource)};export default function(pi){pi.on("session_start",(_e,ctx)=>applyStatusLineUi(ctx,{placement:"footer"},["📁 harness-space ● GPT-6.1 Sol 272k high 18k · named"]));}`);
- const uiLoaded=await loadExtensions([bridge],temp);assert.deepEqual(uiLoaded.errors,[]);
- for(const handler of uiLoaded.extensions[0].handlers.get('session_start'))await handler({type:'session_start'},ctx);
- const clean=s=>s.replace(/\x1b\[[0-9;]*m/g,'');const footerText=width=>clean(footer.render(width).join(' '));
- assert.match(footerText(220),/harness-space · GPT-6.1 Sol.* · ~20.0 TPS hit 0.0% in 100 out 320/);
- assert.doesNotMatch(footerText(220),/●|cumulative|momentum/);
- assert.match(footer.render(220).join(''),/\x1b\[38;5;8m/,'metrics use existing palette-8 gray');
- statuses.set('throughput','~47.4 TPS hit 90.9% in 28.00M out 229k');
- for(const width of [24,40,60,100,220]){const text=footerText(width);assert.match(text,/out 229k/);assert.match(text,/hit 90.9%/);assert.doesNotMatch(text,/●/);}
- const {createRequire}=await import('node:module');const piRequire=createRequire(join(piRoot,'dist/index.js'));
- const {visibleWidth}=await import(pathToFileURL(piRequire.resolve('@earendil-works/pi-tui')).href);
- for(let width=1;width<=220;width++)assert.ok(footer.render(width).every(s=>visibleWidth(s)<=width));
- statuses.delete('throughput');assert.equal(footer.render(220).length,1);
- await emit('session_shutdown');
- // Generic provider: same safe delta-only estimator. Terminal usage-only jump,
- // hidden thinking, failed responses, provider changes never create speed.
- ctx.model={id:'test',provider:'test-generic',api:'openai-completions'};clock=0;await emit('session_start');await emit('before_provider_request');
- const generic={...base,provider:'test-generic',api:'openai-completions',model:'test'};
- await emit('message_start',{message:generic});
- clock=100;await emit('message_update',{message:generic,assistantMessageEvent:{type:'thinking_delta',delta:'x'.repeat(20000)}});assert.match(line,/^- TPS/);
- for(let i=0;i<4;i++){clock=1000+i*500;await emit('message_update',{message:generic,assistantMessageEvent:{type:'text_delta',delta:'text'.repeat(10)}});}
- assert.match(line,/^~20.0 TPS/);
- clock=2501;await emit('message_update',{message:{...generic,usage:{output:100000}},assistantMessageEvent:{type:'done'}});assert.match(line,/^~20.0 TPS/);
- await emit('message_end',{message:{...generic,stopReason:'aborted',usage:{input:100,cacheRead:0,cacheWrite:0,output:100000}}});assert.match(line,/^- TPS hit 0.0% in 100 out 100k/);
- // Generic last-good fallback survives new request, tiny bursts and a failed
- // provisional 50 TPS estimate, but never leaks to another provider/model.
- await emit('before_provider_request');await emit('message_start',{message:generic});
- for(let i=0;i<4;i++){clock=10000+i*500;await emit('message_update',{message:generic,assistantMessageEvent:{type:'text_delta',delta:'x'.repeat(40)}});}
- await emit('message_end',{message:{...generic,responseId:'generic-good',stopReason:'stop',usage:{input:100,cacheRead:0,cacheWrite:0,output:100}}});
- clock=15000;await emit('before_provider_request');await emit('message_start',{message:generic});assert.match(line,/^~20.0 TPS/);
- for(let i=0;i<4;i++){clock=15001+i*0.01;await emit('message_update',{message:generic,assistantMessageEvent:{type:'text_delta',delta:'x'.repeat(40)}});assert.match(line,/^~20.0 TPS/);}
- await emit('message_end',{message:{...generic,responseId:'generic-short',stopReason:'stop'}});assert.match(line,/^~20.0 TPS/);
- await emit('before_provider_request');await emit('message_start',{message:generic});
- for(let i=0;i<4;i++){clock=20000+i*500;await emit('message_update',{message:generic,assistantMessageEvent:{type:'text_delta',delta:'x'.repeat(100)}});}
- assert.match(line,/^~50.0 TPS/);
- await emit('message_end',{message:{...generic,responseId:'generic-failed',stopReason:'error'}});assert.match(line,/^~20.0 TPS/);
- await emit('before_provider_request');assert.match(line,/^~20.0 TPS/);
- ctx.model={id:'test',provider:'other',api:'other'};await emit('model_select');assert.match(line,/^- TPS/);
- await emit('session_shutdown');
- // Recorded auxiliary usage and idle journal changes update counters, not TPS.
- const ledger=[{type:'message',id:'saved',message:final}];
- ctx.sessionManager={getEntries:()=>ledger};clock=0;await emit('session_start');
- assert.match(line,/in 1.0k out 100k/);
- const auxiliary={input:10,cacheRead:20,cacheWrite:0,output:5};
- ledger.push({type:'usage',id:'warm',usage:auxiliary});await command.handler('status',ctx);
- assert.match(line,/in 1.0k out 100.0k/);
- ledger.push({type:'compaction',id:'compact',usage:auxiliary});await emit('session_compact');
- ledger.push({type:'branch_summary',id:'summary',usage:auxiliary});await emit('session_tree');
- ledger.push({type:'message',id:'tool',message:{role:'toolResult',usage:auxiliary}});await emit('turn_end');
- assert.match(line,/^- TPS hit 90.0% in 1.1k out 100.0k/);
- await emit('session_shutdown');delete ctx.sessionManager;
- // Guard migrations, idempotence, local edits, and no half-written overlay.
- const dir=join(temp,'src');mkdirSync(dir);const target=join(dir,'index.ts');
- const originalPath=process.env.THROUGHPUT_ORIGINAL??join(agentDir,'npm/node_modules/pi-live-throughput/src/index.ts.pi-harness-original');
- const original=readFileSync(originalPath);writeFileSync(target,original);
- const patch=join(repo,'patches/fix-pi-live-throughput-codex.mjs');const apply=()=>spawnSync(process.execPath,[patch,`--target=${target}`],{encoding:'utf8'});
- let result=apply();assert.equal(result.status,0,result.stderr);const installed=readFileSync(target);result=apply();assert.equal(result.status,0,result.stderr);assert.deepEqual(readFileSync(target),installed);
- writeFileSync(target,Buffer.concat([installed,Buffer.from('\n// unknown edit')]));const edited=readFileSync(target);result=apply();assert.notEqual(result.status,0);assert.deepEqual(readFileSync(target),edited);
- writeFileSync(target,original);writeFileSync(join(dir,'codex-throughput.ts'),'// local edit');result=apply();assert.notEqual(result.status,0);assert.deepEqual(readFileSync(target),original);
- const uiTarget=join(dir,'ui.ts');const uiOriginal=process.env.STATUSLINE_ORIGINAL??join(agentDir,'npm/node_modules/pi-statusline/src/ui.ts.pi-harness-original');writeFileSync(uiTarget,readFileSync(uiOriginal));
- const patchUI=()=>spawnSync(process.execPath,[join(repo,'patches/fix-pi-statusline-throughput.mjs'),`--target=${uiTarget}`],{encoding:'utf8'});
- result=patchUI();assert.equal(result.status,0,result.stderr);const uiPatched=readFileSync(uiTarget);result=patchUI();assert.equal(result.status,0,result.stderr);assert.deepEqual(readFileSync(uiTarget),uiPatched);
- writeFileSync(uiTarget,Buffer.concat([uiPatched,Buffer.from('\n// unknown edit')]));const uiEdited=readFileSync(uiTarget);result=patchUI();assert.notEqual(result.status,0);assert.deepEqual(readFileSync(uiTarget),uiEdited);
- console.log('PASS: actual Pi loader + native SSE parser, safe Codex/generic TPS, in/out counters, no native rescale, held idle/next/short/failed TPS, reset/off/model lifecycles, middle dots, widths 1–220, patch guards; zero inference');
-} finally {
- if(descriptor)Object.defineProperty(performance,'now',descriptor);else delete performance.now;
- globalThis.fetch=savedFetch;rmSync(temp,{recursive:true,force:true});
+import {spawnSync} from 'node:child_process';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,readdirSync,statSync,rmSync,existsSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join,dirname,relative} from 'node:path';
+import {createRequire} from 'node:module';
+import {pathToFileURL} from 'node:url';
+import {Suite,harness,operation,model,repo,piRoot,installed,close} from './codex-throughput-oracles.mjs';
+import {buildPlan,applyPlan} from '../patches/fix-pi-live-throughput-codex.mjs';
+const suite=new Suite('extension-footer-guards');
+const temp=mkdtempSync(join(tmpdir(),'tps-extension-acceptance-'));
+const oldFetch=globalThis.fetch;globalThis.fetch=()=>{throw Error('Network forbidden');};
+const put=(path,bytes)=>{mkdirSync(dirname(path),{recursive:true});writeFileSync(path,bytes);};
+const baseline=name=>{const r=spawnSync('git',['show',`ac30afa:${name}`],{cwd:repo});assert.equal(r.status,0,r.stderr.toString());return r.stdout;};
+const require=createRequire(join(piRoot,'dist/index.js'));
+const {visibleWidth}=await import(pathToFileURL(require.resolve('@earendil-works/pi-tui')).href);
+const clean=s=>s.replace(/\x1b\[[0-9;]*m/g,'');
+let serial=0;
+function deployment(){
+ const root=join(temp,`deploy-${serial++}`),agent=join(root,'agent'),target=join(agent,'npm/node_modules/pi-live-throughput/src/index.ts');
+ put(target,baseline('patches/pi-live-throughput/index.ts'));put(join(dirname(target),'codex-throughput.ts'),baseline('patches/pi-live-throughput/codex-throughput.ts'));
+ put(join(agent,'patches/pi-live-throughput/index.ts'),baseline('patches/pi-live-throughput/index.ts'));
+ put(join(agent,'patches/pi-live-throughput/codex-throughput.ts'),baseline('patches/pi-live-throughput/codex-throughput.ts'));
+ put(join(agent,'patches/fix-pi-live-throughput-codex.mjs'),baseline('patches/fix-pi-live-throughput-codex.mjs'));
+ put(join(agent,'unrelated'),'preserved unrelated bytes');
+ return {root,agent,target,options:{agentDir:agent,target,copies:true}};
 }
+function snapshot(root){const out={};const walk=path=>{for(const name of readdirSync(path).sort()){const p=join(path,name),s=statSync(p),key=relative(root,p);out[key]=s.isDirectory()?{dir:true,mode:s.mode}:{bytes:readFileSync(p).toString('base64'),mode:s.mode};if(s.isDirectory())walk(p);}};walk(root);return out;}
+async function fixture(fn,options){const h=await harness(options);try{await fn(h);}finally{await h.dispose();}}
+try{
+ const footerBridge=join(temp,'footer-fixture.ts');const uiSource=process.env.STATUSLINE_UI_SOURCE??join(repo,'patches/pi-live-throughput/statusline-ui.ts');
+ put(footerBridge,`import {applyStatusLineUi} from ${JSON.stringify(uiSource)};export default function(pi){pi.on('session_start',(_event,ctx)=>applyStatusLineUi(ctx,{placement:'footer'},['📁 harness-space ● GPT-6.1 Sol 272k high 18k · named']));}`);
+ await suite.test('actual loader/footer exact adjacent LIVE/native AVG once, middle dots and gray',()=>fixture(async h=>{
+  const op=await operation(h,{id:'footer',duration:10000,output:455,texts:[' seed',' a'.repeat(161)],times:[5000,10000]});await op.save();
+  const lines=h.footer.render(220);const text=clean(lines.join(' '));
+  assert.match(text,/harness-space · GPT-6\.1 Sol.* · ~32\.2 ~45\.5 TPS hit 90\.0% in 1\.0k out 455/);
+  assert.equal((text.match(/TPS/g)??[]).length,1);assert.doesNotMatch(text,/●|CURRENT|AVG|cumulative|momentum/);
+  assert.match(lines.join(''),/\x1b\[38;5;8m/);
+ },{extraPaths:[footerBridge]}));
+ await suite.test('footer widths 1–220: bounded, both complete numeric words in correct order from width5',()=>fixture(async h=>{
+  h.statuses.set('throughput','~32.2 ~45.5 TPS hit 90.9% in 28.00M out 229k');
+  for(let width=1;width<=220;width++){
+   const rendered=h.footer.render(width),text=clean(rendered.join(' '));
+   assert.ok(rendered.every(line=>visibleWidth(line)<=width),`width ${width}`);
+   if(width>=5){assert.ok(text.includes('~32.2'),`LIVE lost at width ${width}: ${text}`);assert.ok(text.includes('~45.5'),`AVG lost at width ${width}: ${text}`);assert.ok(text.indexOf('~32.2')<text.indexOf('~45.5'),`numbers swapped at width ${width}`);}
+   if(width>=6)for(const field of ['TPS','hit','90.9%','in','28.00M','out','229k'])assert.ok(text.split(' ').includes(field),`field ${field} lost at ${width}`);
+   assert.doesNotMatch(text,/●/);
+  }
+ },{extraPaths:[footerBridge]}));
+ await suite.test('missing hybrid - - TPS footer + status/widget/off/on controls',()=>fixture(async h=>{
+  assert.equal(h.line,'- - TPS hit - in 0 out 0');assert.match(clean(h.footer.render(220).join(' ')),/- - TPS hit - in 0 out 0/);
+  await h.command('widget');assert.equal(h.statuses.has('throughput'),false);assert.deepEqual(h.widgets.get('throughput'),['- - TPS hit - in 0 out 0']);
+  await h.command('off');assert.equal(h.widgets.has('throughput'),false);assert.doesNotMatch(clean(h.footer.render(220).join(' ')),/TPS/);
+  await h.command('on');assert.equal(h.widgets.has('throughput'),true);await h.command('status');assert.equal(h.widgets.has('throughput'),false);assert.equal(h.statuses.has('throughput'),true);
+ },{extraPaths:[footerBridge]}));
+ await suite.test('actual AgentSession replacement + saved-entry resolver + turn_end boundary',()=>fixture(async h=>{
+  const {AgentSession}=await installed('dist/core/agent-session.js');
+  const op=await operation(h,{id:'real-boundary',output:320});
+  const replacement={path:'replacement-fixture',handlers:new Map([['message_end',[event=>({message:{...event.message,content:[{type:'text',text:'final replacement fixture'}]}})]]])};h.runner.extensions.push(replacement);
+  // Exercise installed AgentSession methods, NOT inference/agent.prompt. Only
+  // unrelated context projection/continuation is stubbed; identity resolution,
+  // replacement and real runner dispatch are unmodified production methods.
+  const session=Object.create(AgentSession.prototype);
+  Object.assign(session,{_extensionRunner:h.runner,sessionManager:h.manager,_entryIdsByMessage:new WeakMap(),_boundaryDispatchedMessages:new WeakSet(),_turnIndex:0,agent:{state:{messages:[op.message]}}});
+  session._buildBoundaryContext=()=>({canContinue:false,entries:[],messages:[]});session._commitBoundaryDrafts=drafts=>assert.deepEqual(drafts,[]);
+  await session._emitExtensionEvent({type:'message_end',message:op.message});assert.equal(h.d.ledger.value,undefined);
+  assert.equal(op.message.content[0].text,'final replacement fixture');const id=h.manager.appendMessage(op.message);
+  await session._emitExtensionEvent({type:'turn_end',message:op.message,toolResults:[]});
+  assert.equal(h.manager.getEntry(id).message,op.message);close(h.d.ledger.value,320);assert.equal(h.d.heldRate,undefined);
+ }));
+ await suite.test('LAST held during idle/new warmup; malformed active stream cannot overwrite',()=>fixture(async h=>{
+  await (await operation(h,{id:'last',duration:3000,texts:[' seed',' a'.repeat(100)],times:[1000,2000]})).save();const before=h.line;
+  await h.emit('session_tree',{},100000);assert.equal(h.line,before);
+  await h.emit('before_provider_request',{},100000);assert.equal(h.line,before);
+  await h.raw({type:'response.output_text.delta',item_id:'missing',content_index:0,delta:'malformed'},100001);assert.equal(h.line,before);
+  await h.command('reset');assert.match(h.line,/^- ~33\.3 TPS/);
+ }));
+ await suite.test('real UI timer advances active silence to 0.0, adds no fake volume or AVG duration',()=>fixture(async h=>{
+  await h.emit('before_provider_request',{},0);await h.raw({type:'response.created',response:{id:'silence'}},0);await h.raw({type:'response.output_item.added',item:{id:'m',type:'message'}},0);
+  await h.raw({type:'response.output_text.delta',item_id:'m',content_index:0,delta:' seed'},1000);await h.raw({type:'response.output_text.delta',item_id:'m',content_index:0,delta:' a'.repeat(100)},2000);
+  assert.match(h.line,/^~100\.0 - TPS/);const volume=h.d.measurement.window.tokens;
+  h.state.clock=3000;await new Promise(resolve=>setTimeout(resolve,230));assert.match(h.line,/^~50\.0 - TPS/);
+  h.state.clock=6000;await new Promise(resolve=>setTimeout(resolve,230));assert.match(h.line,/^~0\.0 - TPS/);assert.equal(h.d.measurement.window.tokens,volume);assert.equal(h.d.ledger.average.elapsedMs,0);
+ }));
+ await suite.test('strict ac30afa v4 migration, canonical helpers/copies + idempotence',async()=>{
+  const f=deployment();const plan=buildPlan(f.options);assert.ok(await applyPlan(plan)>0);
+  for(const p of plan)assert.deepEqual(readFileSync(p.path),p.bytes);const snap=snapshot(f.agent);
+  assert.equal(await applyPlan(buildPlan(f.options)),0);assert.deepEqual(snapshot(f.agent),snap);
+  assert.equal(readFileSync(join(f.agent,'unrelated'),'utf8'),'preserved unrelated bytes');
+ });
+ for(const index of [2,3])await suite.test(`failure between write${index} and next rolls back ALL helpers/canonical copies + runtime`,async()=>{
+  const f=deployment(),stage=join(f.root,'runtime-stage'),target=join(f.agent,'tps-runtime');put(join(target,'package.json'),'old runtime');put(join(target,'old'),'retain');put(join(stage,'package.json'),'new runtime');put(join(stage,'new'),'replace');
+  const snap=snapshot(f.agent);await assert.rejects(applyPlan(buildPlan(f.options),{runtimeStage:stage,runtimeTarget:target,testEnv:{PI_TPS_TEST_MODE:'1',PI_TPS_TEST_FAIL_AFTER_WRITE:String(index)}}),/TEST-only/);
+  assert.deepEqual(snapshot(f.agent),snap);assert.ok(!existsSync(stage));
+ });
+ await suite.test('verification failure rolls back transaction, no loader-visible mixed helpers',async()=>{
+  const f=deployment(),snap=snapshot(f.agent);await assert.rejects(applyPlan(buildPlan(f.options),{verify:()=>{throw Error('independent postcheck failure');}}),/postcheck failure/);assert.deepEqual(snapshot(f.agent),snap);
+ });
+ for(const name of ['index.ts','codex-throughput.ts','reference-tokenizer.ts'])await suite.test(`unknown ${name} protected before ANY writes`,()=>{
+  const f=deployment();put(join(dirname(f.target),name),'unreviewed independent local edit');const snap=snapshot(f.agent);assert.throws(()=>buildPlan(f.options),/unreviewed/);assert.deepEqual(snapshot(f.agent),snap);
+ });
+ await suite.test('stale held plan cannot write over intervening local helper edit',async()=>{
+  const f=deployment(),plan=buildPlan(f.options);put(join(dirname(f.target),'reference-tokenizer.ts'),'concurrent local helper');const snap=snapshot(f.agent);
+  await assert.rejects(applyPlan(plan),/preflight changed/);assert.deepEqual(snapshot(f.agent),snap);
+ });
+ await suite.test('statusline canonical idempotence/unknown edit protected, entirely TEMP',()=>{
+  const target=join(temp,'ui.ts');put(target,readFileSync(uiSource));const patch=join(repo,'patches/fix-pi-statusline-throughput.mjs');
+  const run=()=>spawnSync(process.execPath,[patch,`--target=${target}`],{encoding:'utf8',env:{...process.env,PI_CODING_AGENT_DIR:join(temp,'unused-agent')}});
+  const before=readFileSync(target);assert.equal(run().status,0);assert.deepEqual(readFileSync(target),before);
+  put(target,Buffer.concat([before,Buffer.from('\n// unreviewed local footer edit')]));const edited=readFileSync(target);const result=run();assert.notEqual(result.status,0);assert.match(result.stderr,/no files written/);assert.deepEqual(readFileSync(target),edited);
+ });
+}finally{globalThis.fetch=oldFetch;rmSync(temp,{recursive:true,force:true});}
+suite.finish();

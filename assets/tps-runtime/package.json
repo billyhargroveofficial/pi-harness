@@ -1,0 +1,9 @@
+{
+  "name": "pi-tps-reference-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Isolated o200k_base reference BPE for approximate LIVE TPS; not a model tokenizer mapping",
+  "dependencies": {
+    "gpt-tokenizer": "4.0.0"
+  }
+}

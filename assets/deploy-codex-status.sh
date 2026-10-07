@@ -26,13 +26,11 @@ put_atomic() {
   cp -p "$1" "$tmp"
   mv -f "$tmp" "$2"
 }
-for name in fix-pi-live-throughput-codex.mjs fix-pi-statusline-throughput.mjs; do
-  put_atomic "$REPO_DIR/patches/$name" "$AGENT_DIR/patches/$name"
-done
-for source in "$REPO_DIR"/patches/pi-live-throughput/*.ts; do
-  put_atomic "$source" "$AGENT_DIR/patches/pi-live-throughput/$(basename "$source")"
-done
-node "$AGENT_DIR/patches/fix-pi-live-throughput-codex.mjs"
+# Unified TPS deployment stages runtime + code and verifies all installed
+# acceptance suites before removing transaction rollback snapshots.
+bash "$REPO_DIR/assets/deploy-tps-speedometer.sh"
+put_atomic "$REPO_DIR/patches/fix-pi-statusline-throughput.mjs" "$AGENT_DIR/patches/fix-pi-statusline-throughput.mjs"
+put_atomic "$REPO_DIR/patches/pi-live-throughput/statusline-ui.ts" "$AGENT_DIR/patches/pi-live-throughput/statusline-ui.ts"
 node "$AGENT_DIR/patches/fix-pi-statusline-throughput.mjs"
 mkdir -p "$SL_DIR"
 if [ -f "$SL_DIR/statusline.py" ] && ! cmp -s "$REPO_DIR/assets/statusline.py" "$SL_DIR/statusline.py"; then

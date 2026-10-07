@@ -1,130 +1,106 @@
-/** Conservative client output-delivery proxy. No cumulative TPS; no billing
- * usage projected onto tiny streamed tails. See docs/codex-throughput.md. */
-import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
-import { CodexThroughput, OutputWindow, formatRate } from "./codex-throughput.ts";
-// pi-harness: native Codex output metrics v4, held last good TPS.
+/** HYBRID: ~LIVE reference-BPE delivery, ~AVG native effective operation TPS.
+ * LIVE fallback is LAST, not a fresh idle observation. AVG starts at the durable
+ * enable/reset epoch; historical usage without operation durations is not AVG.
+ */
+import { getAgentDir, type ExtensionAPI, type ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import { CodexThroughput, POLICY } from "./codex-throughput.ts";
+import { resolveReferenceTokenizer, type TokenizerResolver } from "./reference-tokenizer.ts";
 
-type Json = Record<string, any>;
 type DisplayMode = "widget" | "status";
-export default function (pi: ExtensionAPI): void {
-	const codex = new CodexThroughput();
+export function createThroughputExtension(pi: ExtensionAPI, options: { resolver?: TokenizerResolver; clock?: () => number } = {}): CodexThroughput {
+	const codex = new CodexThroughput(options.resolver ?? (() => resolveReferenceTokenizer({ agentDir: getAgentDir() })));
+	const clock = options.clock ?? (() => performance.now());
 	let mode: DisplayMode = "status";
 	let enabled = true;
 	let ui: ExtensionUIContext | undefined;
 	let hasUI = false;
 	let timer: ReturnType<typeof setInterval> | undefined;
 	let lastLine = "";
-	let generic: { window: OutputWindow; key: string; final: boolean; valid: boolean } | undefined;
-	let selected = "";
-	let lastGeneric: number | undefined;
 	let manager: any;
 	let entryCount = -1;
+	const append = (type: string, record: any) => pi.appendEntry(type, record);
 	const syncUsage = (force = false) => {
-		if (!manager?.getEntries) return;
-		const entries = manager.getEntries();
-		if (force || entries.length !== entryCount) { codex.input.restore(entries); entryCount = entries.length; }
+		try {
+			const entries = manager?.getEntries?.();
+			if (entries && (force || entries.length !== entryCount)) { codex.input.restore(entries); entryCount = entries.length; }
+		} catch { /* Temporary/missing UI session managers must not throw. */ }
 	};
-	const key = (message: Json) => `${message.provider}/${message.responseModel ?? message.model ?? message.id}`;
 	const clearUi = () => { ui?.setWidget("throughput", undefined); ui?.setStatus("throughput", undefined); lastLine = ""; };
 	const render = () => {
 		if (!hasUI || !enabled) return;
 		syncUsage();
-		const now = performance.now();
-		const current = generic?.valid && !generic.window.invalid
-			? (generic.window.current(now, generic.final) ?? generic.window.lastEstimated) : undefined;
-		const line = codex.render(mode, now) ?? `${formatRate(current ?? lastGeneric)} TPS ${codex.input.fields()}`;
+		const line = codex.render(mode, clock());
 		if (line === lastLine) return;
 		lastLine = line;
 		if (mode === "status") { ui?.setWidget("throughput", undefined); ui?.setStatus("throughput", line); }
 		else { ui?.setStatus("throughput", undefined); ui?.setWidget("throughput", [line]); }
 	};
-	const bind = (ctx: any) => { ui = ctx.ui; hasUI = ctx.hasUI; if (ctx.sessionManager !== manager) { manager = ctx.sessionManager; entryCount = -1; } };
+	const bind = (ctx: any) => { ui = ctx.ui; hasUI = ctx.hasUI; manager = ctx.sessionManager; };
 	pi.on("session_start", (_event, ctx) => {
-		bind(ctx); generic = undefined; lastGeneric = undefined; selected = ctx.model ? key(ctx.model) : "";
-		codex.sessionReset(ctx.sessionManager?.getEntries?.() ?? []); entryCount = ctx.sessionManager?.getEntries?.().length ?? -1; codex.select(ctx.model);
+		bind(ctx); entryCount = -1;
+		codex.sessionReset(); syncUsage(true); codex.bindLedger(manager, append); codex.select(ctx.model);
 		if (timer) clearInterval(timer);
-		// Timer refreshes the usage ledger, never invents a speed measurement.
-		// Last safe TPS stays visible during silence and next-request warmup.
-		if (hasUI) { timer = setInterval(render, 500); timer.unref?.(); }
+		// Active silence decays LIVE, never fabricates tokens. No native pending
+		// duration is mixed into the completed-operation denominator.
+		if (hasUI) { timer = setInterval(render, POLICY.cadenceMs); timer.unref?.(); }
 		clearUi(); render();
 	});
-	pi.on("model_select", (_event, ctx) => {
-		bind(ctx); const next = ctx.model ? key(ctx.model) : "";
-		if (next !== selected) { generic = undefined; lastGeneric = undefined; }
-		selected = next; codex.select(ctx.model); render();
-	});
-	const refreshUsage = (_event: any, ctx: any) => { bind(ctx); syncUsage(true); render(); };
-	pi.on("turn_end", refreshUsage);
-	pi.on("session_compact", refreshUsage);
-	pi.on("session_tree", refreshUsage);
-	pi.on("session_shutdown", () => {
-		if (timer) clearInterval(timer); timer = undefined;
-		clearUi(); generic = undefined; lastGeneric = undefined; codex.sessionReset(); manager = undefined; entryCount = -1; ui = undefined; hasUI = false;
-	});
+	pi.on("model_select", (_event, ctx) => { bind(ctx); codex.select(ctx.model); render(); });
 	pi.on("before_provider_request", (_event, ctx) => {
-		bind(ctx); generic = undefined;
-		const next = ctx.model ? key(ctx.model) : "";
-		if (next !== selected) lastGeneric = undefined;
-		selected = next;
-		if (ctx.model) codex.prepare(ctx.model, performance.now());
-		else { codex.measurement = undefined; codex.final = false; codex.finalValid = false; }
+		const at = clock(); bind(ctx);
+		if (ctx.model) codex.prepare(ctx.model, at);
+		else { codex.closeUnknown(); codex.select(undefined); }
 		render();
 	});
 	pi.on("provider_stream_event", (event, ctx) => {
-		const at = performance.now();
-		if (event.api !== "openai-codex-responses" || !event.data || typeof event.data !== "object") return;
+		const at = clock();
+		if (event.api !== "openai-codex-responses") return;
 		bind(ctx);
-		if (codex.measurement && ((event.model && event.model !== codex.measurement.model) || (event.provider && ctx.model?.provider && event.provider !== ctx.model.provider))) { codex.measurement.invalid = true; render(); return; }
-		if (codex.provider(event.data, at)) render();
+		if (codex.provider(event.data as Record<string, any>, at, { provider: event.provider, api: event.api, model: event.model })) render();
 	});
 	pi.on("message_start", (event, ctx) => {
 		if (event.message.role !== "assistant") return;
-		bind(ctx); codex.start(event.message);
-		if (codex.active) generic = undefined;
-		else generic = { window: new OutputWindow(), key: key(event.message), final: false, valid: true };
-		render();
-	});
-	pi.on("message_update", (event, ctx) => {
-		if (event.message.role !== "assistant" || codex.active || !generic || generic.final) return;
-		bind(ctx);
-		if (key(event.message) !== generic.key) { generic.valid = false; generic.window.invalid = true; render(); return; }
-		const update = event.assistantMessageEvent;
-		// Delivered thinking deltas may be summaries; not output decode counts.
-		// Never treat final usage or completed snapshots as a timed output burst.
-		if (["text_delta", "toolcall_delta"].includes(update.type)) {
-			if (typeof update.delta !== "string") { generic.valid = false; generic.window.invalid = true; }
-			else generic.window.add(performance.now(), update.delta.length);
-			render();
-		}
+		bind(ctx); codex.start(event.message); render();
 	});
 	pi.on("message_end", (event, ctx) => {
-		bind(ctx);
-		if (event.message.role === "toolResult") { codex.input.add(event.message, false); render(); return; }
-		if (event.message.role !== "assistant") return;
-		const duplicateEnd = codex.active ? codex.final : generic?.final;
-		if (!duplicateEnd) codex.input.add(event.message);
-		if (codex.active) codex.end(event.message);
-		else if (generic && !generic.final) {
-			generic.final = true;
-			generic.valid = generic.valid && !generic.window.invalid && key(event.message) === generic.key
-				&& !["error", "aborted", "length"].includes(event.message.stopReason);
-			if (generic.valid && generic.window.lastEstimated !== undefined) lastGeneric = generic.window.lastEstimated;
-		}
+		const at = clock(); bind(ctx);
+		if (event.message.role === "toolResult") codex.input.add(event.message, false);
+		else if (event.message.role === "assistant") codex.end(event.message, at);
+		// Freeze only. turn_end resolves the final saved assistant AFTER all
+		// message_end replacement handlers. Never bill the early event object.
 		render();
 	});
+	pi.on("turn_end", (event, ctx) => {
+		bind(ctx); codex.commitSaved(event.messageEntryId, manager); syncUsage(true); render();
+	});
+	const refreshUsage = (_event: any, ctx: any) => { bind(ctx); syncUsage(true); render(); };
+	pi.on("session_compact", refreshUsage);
+	pi.on("session_tree", refreshUsage);
+	pi.on("agent_before_settle", (_event, ctx) => {
+		bind(ctx); codex.closeUnknown(); render();
+		// Covers abort/error paths without turn_end; durable start is closed as
+		// UNKNOWN, rather than silently excluding the operation from coverage.
+	});
+	pi.on("session_shutdown", () => {
+		codex.closeUnknown();
+		if (timer) clearInterval(timer); timer = undefined;
+		clearUi(); codex.sessionReset(); manager = undefined; entryCount = -1; ui = undefined; hasUI = false;
+	});
 	pi.registerCommand("throughput", {
-		description: "Output TPS estimate and session in/out. Args: on|off|widget|status|reset",
+		description: "Hybrid LIVE/AVG TPS; session in/out. on|off|widget|status|reset|reset-avg|reset-all",
 		handler: async (args, ctx) => {
 			bind(ctx); const arg = args.trim().toLowerCase();
 			if (!arg || arg === "toggle") { enabled = !enabled; clearUi(); render(); }
 			else if (arg === "on" || arg === "off") { enabled = arg === "on"; clearUi(); render(); }
 			else if (arg === "widget" || arg === "status") { mode = arg; enabled = true; clearUi(); render(); }
-			else if (arg === "reset") {
-				codex.reset(); lastGeneric = undefined;
-				if (generic) { if (generic.final) generic = undefined; else generic.window = new OutputWindow(); }
-				clearUi(); render(); ctx.ui.notify("TPS observation reset; session usage unchanged", "info"); return;
-			} else { ctx.ui.notify("Usage: /throughput [on|off|widget|status|reset|toggle]", "error"); return; }
+			else if (["reset", "reset-avg", "reset-all"].includes(arg)) {
+				if (arg !== "reset-avg") codex.reset();
+				if (arg !== "reset") codex.resetAverage();
+				clearUi(); render(); ctx.ui.notify(arg === "reset" ? "LIVE reset; AVG and session usage unchanged" : "New native AVG measurement epoch; session usage unchanged", "info"); return;
+			} else { ctx.ui.notify("Usage: /throughput [on|off|widget|status|reset|reset-avg|reset-all|toggle]", "error"); return; }
 			ctx.ui.notify(`Live throughput: ${enabled ? mode : "off"}`, "info");
 		},
 	});
+	return codex;
 }
+export default function (pi: ExtensionAPI): void { createThroughputExtension(pi); }

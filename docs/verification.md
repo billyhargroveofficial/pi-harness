@@ -15,25 +15,51 @@ timeout 30 script -q /dev/null pi --tui-mode regular --session \
 
 Так получены цифры из [`compact-output.md`](compact-output.md) и проверка скрытия thinking (5 блоков → 5 строк `Thought for`, 0 утечек).
 
-## 2. Офлайн-прогон throughput v4 (7 октября 2026)
+## 2. Офлайн-прогон гибридного LIVE/native AVG (7 октября 2026)
 
 ```bash
 node tests/codex-throughput.mjs
+node tests/codex-throughput-oracles.mjs
 node tests/codex-throughput-extension.mjs
+node tests/codex-throughput-native-session.mjs
+node tests/codex-throughput-transport.mjs
+node tests/codex-throughput-deploy.mjs
 ```
 
-Проверяются adversarial native события и 1200 детерминированных schedule fuzz
-replays. Integration-тест использует настоящий loader Pi и настоящий SSE parser
-Codex, mock Response и dummy JWT; сеть отключена. На fixture с четырьмя deltas
-по 40 UTF-16 units за 1.5 s выводит `~20.0 TPS` (первый chunk исключён),
-даже если native output = 100000. Проверенный результат:
-`~20.0 TPS hit 90.0% in 1.0k out 100k`. Пауза и переход на новый запрос сохраняют
-последнее корректное TPS; новое значение заменяет его только после пригодного
-измерения. Ошибочный provisional ответ не портит предыдущий подтверждённый TPS.
-Reset очищает TPS, но не usage.
+Нужен dedicated pinned runtime `<agentDir>/tps-runtime`; TEMP-фикстуру можно
+выбрать `TPS_TOKENIZER_DIR`. LIVE и AVG проверяются **разными** oracle:
+reference-BPE prefix differences и native ratio-of-sums с client operation time.
 
-Исследование измерительных ограничений и источники: [codex-throughput.md](codex-throughput.md).
-Старые скорости widget/native-rescaled версии не используются как эталон v4.
+После исправлений основным агентом: unit/controller suite — **99 PASS + 600
+математических replay**, independent oracle — **8 PASS**, loader/footer/guards —
+**15 PASS**, actual SessionManager/saved-boundary suite — **34 PASS**, native
+SSE/WebSocket transport — **17 PASS**. Сеть/inference запрещены fixtures;
+настоящие credentials и приватные session contents не читаются.
+
+Exact hybrid fixture выводит `~32.2 ~45.5 TPS`. Нативный `output=320` с
+`reasoning=300` даёт numerator **320**, не 20. Weighted `100/1s + 100/10s`
+даёт **200/11**, не 55. Смена native output не изменяет LIVE.
+
+Реальный SSE delivery schedule задаёт clock вне metrics callback; whole-body
+buffered test не растягивает события искусственно. Есть actual Pi loader,
+ExtensionRunner, SessionManager/AgentSession boundary, native WS queue,
+retry/continuation, reset-before-deferred-start, late duplicate end, crash gap,
+fork/compaction, saved replacement, dedup/conflicting records и widths 1–220.
+Дополнительные регрессии защищают net signed BPE recovery, replay epoch markers
+и финальные tool identities/arguments независимо от AVG.
+
+Benchmark: 50 000 символов/callbacks, **26** полных encode, около **21 ms** общего
+offline wall time на Mac в конкретном прогоне (не server latency/модельный TPS).
+Runtime/deploy suite — **45 PASS**. Все пять acceptance suites и actual-loader
+smoke прошли также внутри реального Mac deployment против installed bytes,
+без `TPS_TOKENIZER_DIR`; successful install не подменён canonical-only тестами.
+Суммарно: **218 checks + 600 mathematical replays**. Восемь файлов моделей,
+OAuth/инструкций/настроек и существующего футера остались byte-identical.
+Isolated updater regression дополнительно проверяет flags/reinstall/error
+propagation; его HOME и agent directory находятся только в TEMP.
+
+Контракт и пределы: [codex-throughput.md](codex-throughput.md). Старые UTF-16/4
+или native-rescaled числа не используются как эталон новой схемы.
 
 ## 3. Проверка загрузки
 

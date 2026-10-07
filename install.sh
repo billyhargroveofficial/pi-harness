@@ -8,6 +8,11 @@ AGENT_DIR="${PI_CODING_AGENT_DIR:-${PI_AGENT_DIR:-$HOME/.pi/agent}}"
 export PI_CODING_AGENT_DIR="$AGENT_DIR"
 # Drop a retired key inherited from an older terminal for this deployment tree.
 unset DEEPSEEK_API_KEY
+# Read-only guards run before upstream work; runtime + TPS replacement happens
+# together at the overlay transaction below, never before unrelated setup.
+if [ -f "$AGENT_DIR/npm/node_modules/pi-live-throughput/package.json" ]; then
+  node "$REPO_DIR/patches/fix-pi-live-throughput-codex.mjs" --deploy --preflight
+fi
 EXT_CONFIG="$HOME/.pi/settings.json"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 
@@ -137,28 +142,30 @@ echo "Патчи к пакетам (patches/):"
 mkdir -p "$AGENT_DIR/patches"
 for f in "$REPO_DIR"/patches/*.mjs "$REPO_DIR"/patches/*.patch; do
   [ -e "$f" ] || continue
+  [ "$(basename "$f")" != fix-pi-live-throughput-codex.mjs ] || continue
   dst="$AGENT_DIR/patches/$(basename "$f")"
   if [ ! -e "$dst" ] || ! cmp -s "$f" "$dst"; then
     cp -p "$f" "$dst"
     echo "  + $dst"
   fi
 done
-# Source payload for the Codex throughput overlay; copied with the patch.
+# Preserve the separate existing statusline overlay payload (not TPS-owned).
 mkdir -p "$AGENT_DIR/patches/pi-live-throughput"
-for f in "$REPO_DIR"/patches/pi-live-throughput/*.ts; do
-  [ -e "$f" ] || continue
-  dst="$AGENT_DIR/patches/pi-live-throughput/$(basename "$f")"
-  if [ -L "$dst" ] || [ ! -e "$dst" ] || ! cmp -s "$f" "$dst"; then
-    tmp="$(mktemp "$AGENT_DIR/patches/pi-live-throughput/.source.XXXXXXXX")"
-    cp -p "$f" "$tmp"
-    mv -f "$tmp" "$dst"
-  fi
-done
+source="$REPO_DIR/patches/pi-live-throughput/statusline-ui.ts"
+dst="$AGENT_DIR/patches/pi-live-throughput/statusline-ui.ts"
+if [ -L "$dst" ] || [ ! -e "$dst" ] || ! cmp -s "$source" "$dst"; then
+  tmp="$(mktemp "$AGENT_DIR/patches/pi-live-throughput/.source.XXXXXXXX")"
+  cp -p "$source" "$tmp"
+  mv -f "$tmp" "$dst"
+fi
 for f in "$REPO_DIR"/patches/*.mjs; do
   [ -e "$f" ] || continue
+  [ "$(basename "$f")" != fix-pi-live-throughput-codex.mjs ] || continue
   echo "  $(basename "$f")"
   node "$f"
 done
+
+bash "$REPO_DIR/assets/deploy-tps-speedometer.sh"
 
 echo
 python3 "$REPO_DIR/assets/codex-only.py" --agent-dir "$AGENT_DIR" --home "$HOME" --purge-retired-secrets

@@ -1,26 +1,18 @@
-// pi-harness: conservative output delivery metrics with held last good TPS, v4.
+// pi-harness HYBRID: independent reference-BPE LIVE and native operation AVG.
+// LIVE is delivery, not backend decode; AVG includes hidden reasoning and TTFT.
 // MIT; original pi-live-throughput copyright/license remains in the package.
-import { createHash } from "node:crypto";
-
+import { createHash, randomUUID } from "node:crypto";
+import { resolveReferenceTokenizer, type TokenizerResolver } from "./reference-tokenizer.ts";
 type Json = Record<string, any>;
-type Sample = { start: number; t: number; chars: number };
-type TextPart = { hash: ReturnType<typeof createHash>; chars: number; done: boolean };
-type Item = { type: string; parts: Map<number, TextPart>; done: boolean };
-const hash = (text: string) => createHash("sha256").update(text, "utf16le").digest("hex");
+export const hash = (text: string) => createHash("sha256").update(text, "utf16le").digest("hex");
 export const counter = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
-// Measurement policy, NOT a claim about a model's physical maximum. Reject,
-// never clamp. Short/coalesced observations cannot identify decode throughput.
-export const POLICY = Object.freeze({ bucketMs: 50, minSpanMs: 1000, minBuckets: 4,
-	minChars: 32, windowMs: 3000, staleMs: 3000, maxTps: 1000, maxBucketShare: 0.8 });
-export const formatRate = (value: number | undefined, estimated = true) =>
-	value === undefined || !Number.isFinite(value) || value < 0.05 || value > POLICY.maxTps
-		? "-" : `${estimated ? "~" : ""}${value.toFixed(1)}`;
+const time = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
+export const POLICY = Object.freeze({ cadenceMs: 200, minSpanMs: 1000, windowMs: 3000, maxUnits: 256 * 1024 });
+export const formatRate = (value: number | undefined) => value === undefined || !Number.isFinite(value) || value < 0 ? "-" : `~${value.toFixed(1)}`;
 export const formatInput = (value: number) => value >= 1000000 ? `${(value / 1000000).toFixed(2)}M`
 	: value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(Math.round(value));
 
-/** Only finalized, valid usage; history includes all branches/pre-compaction.
- * Cache read is part of input, never output. Invalid usage is not a zero miss.
- */
+/** Native in/out accounting is deliberately separate from both TPS counters. */
 export class SessionInput {
 	tokens = 0;
 	outputTokens = 0;
@@ -61,233 +53,558 @@ export class SessionInput {
 	}
 }
 
-/** First bucket is a baseline, excluded from the numerator. Bursts within
- * 50ms are one observation, not tiny independent intervals. Render ticks,
- * final usage, done snapshots, tool execution and hidden reasoning add nothing.
- * ~ denotes a UTF-16 chars/4 proxy, NOT server decode or exact token timing.
+type PrefixPart = { text: string; tokens: number; dirty: boolean };
+type Sample = { t: number; tokens: number };
+/** Full logical prefixes are re-encoded, never chunks. BPE prefix counts can
+ * decrease (unstable suffix); signed changes are retained, not clamped. The
+ * first checkpoint is an untimed baseline. Ticks advance time, not volume.
+ * No content/token IDs are persisted. RAM is bounded across ALL parts.
  */
 export class OutputWindow {
-	first: number | undefined;
-	last: number | undefined;
-	chars = 0;
+	parts = new Map<string, PrefixPart>();
+	units = 0;
+	tokens = 0;
 	samples: Sample[] = [];
-	reason = "warming-up";
 	invalid = false;
-	currentCharsPerSecond: number | undefined;
+	reason = "warming-up";
+	lastCheckpoint: number | undefined;
 	lastEstimated: number | undefined;
-	add(t: number, chars: number): void {
-		if (chars === 0) return;
-		if (this.invalid) return;
-		if (!Number.isFinite(t) || t < 0 || !counter(chars) || !counter(this.chars + chars) || (this.last !== undefined && t < this.last)) {
-			this.invalid = true; this.reason = "invalid-clock-or-count"; this.currentCharsPerSecond = undefined; return;
-		}
-		this.first ??= t; this.last = t; this.chars += chars;
-		const tail = this.samples.at(-1);
-		if (tail && t - tail.start < POLICY.bucketMs) { tail.t = t; tail.chars = this.chars; }
-		else this.samples.push({ start: t, t, chars: this.chars });
-		while (this.samples.length > 2 && this.samples[1].t <= t - POLICY.windowMs) this.samples.shift();
-		this.currentCharsPerSecond = undefined;
-		const baseline = this.samples[0];
-		const ms = t - baseline.t;
-		const received = this.chars - baseline.chars;
-		if (ms < POLICY.minSpanMs || this.samples.length < POLICY.minBuckets || received < POLICY.minChars) { this.reason = "insufficient-observation"; return; }
-		let largest = 0;
-		for (let i = 1; i < this.samples.length; i++) largest = Math.max(largest, this.samples[i].chars - this.samples[i - 1].chars);
-		if (largest / received > POLICY.maxBucketShare) { this.reason = "burst-dominated"; return; }
-		const value = received / (ms / 1000) / 4;
-		if (!Number.isFinite(value) || value > POLICY.maxTps || value < 0.05) { this.reason = "outside-display-policy"; return; }
-		this.reason = "ok"; this.currentCharsPerSecond = value * 4; this.lastEstimated = value;
+	estimatedCurrent: number | undefined;
+	private tokenizer: ReturnType<TokenizerResolver>;
+	constructor(resolver: TokenizerResolver = resolveReferenceTokenizer) {
+		try { this.tokenizer = resolver(); } catch { this.tokenizer = undefined; }
+		if (!this.tokenizer) this.fail("missing-reference-runtime");
 	}
-	get spanMs(): number { return this.first === undefined || this.last === undefined ? 0 : this.last - this.first; }
-	get estimatedCurrent(): number | undefined { return this.currentCharsPerSecond === undefined ? undefined : this.currentCharsPerSecond / 4; }
-	current(now: number, completed = false): number | undefined {
-		if (this.invalid || !Number.isFinite(now) || (this.last !== undefined && now < this.last)) return undefined;
-		if (!completed && this.last !== undefined && now - this.last > POLICY.staleMs) return undefined;
-		return this.estimatedCurrent;
+	fail(reason: string): void {
+		this.invalid = true; this.reason = reason; this.estimatedCurrent = undefined;
+		this.parts.clear(); this.units = 0;
+	}
+	append(partKey: string, delta: string): void {
+		if (this.invalid) return;
+		if (typeof delta !== "string") { this.fail("malformed-delta"); return; }
+		if (!delta.length) return;
+		if (this.units + delta.length > POLICY.maxUnits) { this.fail("reference-buffer-limit"); return; }
+		const part = this.parts.get(partKey) ?? { text: "", tokens: 0, dirty: false };
+		part.text += delta; part.dirty = true; this.units += delta.length; this.parts.set(partKey, part);
+	}
+	checkpoint(t: number, force = false): number | undefined {
+		if (this.invalid) return undefined;
+		if (!time(t) || (this.lastCheckpoint !== undefined && t < this.lastCheckpoint)) { this.fail("invalid-clock"); return undefined; }
+		if (!force && this.lastCheckpoint !== undefined && t - this.lastCheckpoint < POLICY.cadenceMs) return this.estimatedCurrent;
+		if (!this.parts.size) return undefined;
+		try {
+			for (const part of this.parts.values()) if (part.dirty) {
+				const next = this.tokenizer!(part.text);
+				if (!counter(next)) { this.fail("invalid-reference-count"); return undefined; }
+				const total = this.tokens + (next - part.tokens);
+				if (!counter(total)) { this.fail("reference-count-overflow"); return undefined; }
+				this.tokens = total; part.tokens = next; part.dirty = false;
+			}
+		} catch { this.fail("reference-encode-failed"); return undefined; }
+		if (!counter(this.tokens)) { this.fail("reference-count-overflow"); return undefined; }
+		this.lastCheckpoint = t;
+		// Equal times replace volume at that instant, without moving the baseline.
+		// The first atomic checkpoint is NOT replaced by a later same-time burst.
+		if (this.samples.at(-1)?.t !== t) this.samples.push({ t, tokens: this.tokens });
+		else if (this.samples.length > 1) this.samples[this.samples.length - 1] = { t, tokens: this.tokens };
+		const cutoff = t - POLICY.windowMs;
+		// Keep an observation at/before the left edge; no assumed interpolation.
+		while (this.samples.length > 2 && this.samples[1].t <= cutoff) this.samples.shift();
+		const baseline = this.samples[0];
+		const elapsed = t - baseline.t;
+		this.estimatedCurrent = undefined;
+		if (elapsed < POLICY.minSpanMs) { this.reason = "warming-up"; return undefined; }
+		if (this.tokens < baseline.tokens) {
+			this.reason = "negative-prefix-difference"; return undefined;
+		}
+		const value = (this.tokens - baseline.tokens) * 1000 / elapsed;
+		if (!Number.isFinite(value)) { this.fail("rate-overflow"); return undefined; }
+		this.reason = "ok"; this.estimatedCurrent = value; this.lastEstimated = value;
+		return value;
+	}
+	current(t: number, completed = false): number | undefined {
+		return this.invalid ? undefined : completed ? this.estimatedCurrent : this.checkpoint(t);
+	}
+	clearContent(): void { this.parts.clear(); this.units = 0; }
+}
+
+export const NATIVE_ENTRY = "pi-harness:codex-native-throughput";
+export const NATIVE_METRIC = "native-provider-operation";
+export type NativeRecord = {
+	v: 1; metric: typeof NATIVE_METRIC; kind: "epoch" | "start" | "observation" | "unknown";
+	origin: string; epoch: string; operation?: string; responseHash?: string;
+	provider?: string; api?: string; model?: string; nativeTokens?: number; elapsedMs?: number;
+};
+const identifier = (s: unknown): s is string => typeof s === "string" && s.length > 0 && s.length <= 256;
+export const recordKey = (r: NativeRecord) => `${r.origin}/${r.epoch}/${r.kind === "epoch" ? "epoch" : r.kind === "start" ? "start" : "end"}/${r.operation ?? ""}`;
+const signature = (r: Json) => JSON.stringify(Object.keys(r).sort().map(k => [k, r[k]]));
+const records = (entries: Json[]): NativeRecord[] => entries.filter(e => e.type === "custom" && e.customType === NATIVE_ENTRY).map(e => e.data);
+const validRecord = (r: Json): boolean => !!r && r.v === 1 && r.metric === NATIVE_METRIC && identifier(r.origin) && identifier(r.epoch)
+	&& ["epoch", "start", "observation", "unknown"].includes(r.kind)
+	&& (r.kind === "epoch" || identifier(r.operation))
+	&& (r.kind !== "observation" || (identifier(r.responseHash) && identifier(r.provider) && identifier(r.api) && identifier(r.model)
+		&& counter(r.nativeTokens) && time(r.elapsedMs) && r.elapsedMs > 0 && r.elapsedMs <= Number.MAX_SAFE_INTEGER));
+
+/** Pure ratio-of-sums oracle. All own branches/models, excluding inherited
+ * foreign-origin records. Pending operations do NOT grow the denominator.
+ * Unclosed starts on restore mean UNKNOWN; history before the epoch has no
+ * invented duration. AVG is since the counter was enabled/reset, not all history.
+ */
+export class NativeAverage {
+	epoch: string | undefined;
+	nativeTokens = 0;
+	elapsedMs = 0;
+	unknown = false;
+	observations = 0;
+	restore(entries: Json[], origin: string, pending = new Set<string>()): void {
+		this.epoch = undefined; this.nativeTokens = 0; this.elapsedMs = 0; this.unknown = false; this.observations = 0;
+		const source = records(entries), own = source.filter(r => r?.origin === origin);
+		let markerIndex = -1;
+		const markers = new Set<string>();
+		for (let i = 0; i < source.length; i++) {
+			const r = source[i];
+			if (r?.origin === origin && validRecord(r) && r.kind === "epoch") {
+				const key = recordKey(r);
+				if (markers.has(key)) continue; // A replay is not a new reset boundary.
+				markers.add(key); this.epoch = r.epoch; markerIndex = i;
+			}
+		}
+		if (!this.epoch) return;
+		// Corrupt records after this epoch cannot disappear merely because their
+		// origin/epoch fields are missing. Explicit foreign-origin inheritance
+		// is still excluded. A new epoch clears earlier malformed coverage.
+		this.unknown = source.slice(markerIndex + 1).some(r => !r || ((!identifier(r.origin) || r.origin === origin) && !validRecord(r)));
+		const seen = new Map<string, NativeRecord>();
+		for (const r of own.filter(r => r.epoch === this.epoch)) {
+			if (!validRecord(r)) { this.unknown = true; continue; }
+			const key = recordKey(r), prior = seen.get(key);
+			if (prior && signature(prior) !== signature(r)) this.unknown = true;
+			else seen.set(key, r);
+		}
+		const starts = new Map<string, NativeRecord>(), ends = new Map<string, NativeRecord>();
+		for (const r of seen.values()) {
+			if (r.kind === "start") starts.set(r.operation!, r);
+			else if (r.kind !== "epoch") ends.set(r.operation!, r);
+		}
+		const responses = new Map<string, string>();
+		for (const [op, r] of ends) {
+			if (!starts.has(op) || r.kind === "unknown") { this.unknown = true; continue; }
+			const responseKey = `${r.provider}/${r.responseHash}`;
+			const attribution = signature({ nativeTokens: r.nativeTokens, elapsedMs: r.elapsedMs, provider: r.provider, api: r.api, model: r.model });
+			if (responses.has(responseKey)) { if (responses.get(responseKey) !== attribution) this.unknown = true; continue; }
+			responses.set(responseKey, attribution);
+			if (!counter(this.nativeTokens + r.nativeTokens!) || !time(this.elapsedMs + r.elapsedMs!) || this.elapsedMs + r.elapsedMs! > Number.MAX_SAFE_INTEGER) {
+				this.unknown = true; continue;
+			}
+			this.nativeTokens += r.nativeTokens!; this.elapsedMs += r.elapsedMs!; this.observations++;
+		}
+		for (const op of starts.keys()) if (!ends.has(op) && !pending.has(op)) this.unknown = true;
+	}
+	get value(): number | undefined {
+		const result = this.nativeTokens * 1000 / this.elapsedMs;
+		return this.unknown || !this.observations || !Number.isFinite(result) ? undefined : result;
 	}
 }
 
-/** Native events validate the stream, but final billing usage is not projected
- * onto a short visible-output window. Hashes avoid retaining output content.
+/** Minimal durable ledger. appendEntry mutates SessionManager memory BEFORE
+ * disk I/O; inspect stable keys before any retry, including after exceptions.
+ * A missing temporary UI manager is UNKNOWN, never a thrown lifecycle error.
+ */
+export class NativeLedger {
+	average = new NativeAverage();
+	origin = "";
+	epoch = "";
+	pending = new Set<string>();
+	ready = false;
+	persistenceUnknown = false;
+	private manager: any;
+	private appendEntry: ((type: string, record: NativeRecord) => void) | undefined;
+	private entries(): Json[] { try { return this.manager?.getEntries?.() ?? []; } catch { return []; } }
+	bind(manager: any, appendEntry: (type: string, record: NativeRecord) => void): void {
+		this.manager = manager; this.appendEntry = appendEntry;
+		try { this.origin = manager?.getSessionId?.() ?? ""; } catch { this.origin = ""; }
+		this.ready = identifier(this.origin) && typeof manager?.getEntries === "function";
+		this.pending.clear(); this.persistenceUnknown = false; this.refresh();
+		this.epoch = this.average.epoch ?? "";
+		if (this.ready && !this.epoch) this.reset();
+	}
+	refresh(): void { this.average.restore(this.entries(), this.origin, this.pending); }
+	private persist(record: NativeRecord): boolean {
+		if (!this.ready || !this.appendEntry) return false;
+		const existing = () => records(this.entries()).filter(r => r && recordKey(r) === recordKey(record));
+		let matches = existing();
+		if (matches.length) {
+			if (matches.some(r => signature(r) !== signature(record))) this.persistenceUnknown = true;
+			return !this.persistenceUnknown;
+		}
+		try { this.appendEntry(NATIVE_ENTRY, record); }
+		catch {
+			// Never append a duplicate to repair a failed disk write.
+			this.persistenceUnknown = true; matches = existing();
+			this.refresh(); return false;
+		}
+		matches = existing();
+		if (!matches.length || matches.some(r => signature(r) !== signature(record))) this.persistenceUnknown = true;
+		this.refresh(); return !this.persistenceUnknown;
+	}
+	reset(): void {
+		this.pending.clear(); this.epoch = randomUUID(); this.persistenceUnknown = false;
+		this.persist({ v: 1, metric: NATIVE_METRIC, kind: "epoch", origin: this.origin, epoch: this.epoch }); this.refresh();
+	}
+	begin(): string | undefined {
+		if (!this.ready) return undefined;
+		const operation = hash(randomUUID()); this.pending.add(operation);
+		this.persist({ v: 1, metric: NATIVE_METRIC, kind: "start", origin: this.origin, epoch: this.epoch, operation }); this.refresh();
+		return operation;
+	}
+	end(operation: string | undefined, observation?: Pick<NativeRecord, "responseHash" | "provider" | "api" | "model" | "nativeTokens" | "elapsedMs">): void {
+		if (!operation || !this.pending.has(operation)) return;
+		const r: NativeRecord = { v: 1, metric: NATIVE_METRIC, kind: observation && !this.persistenceUnknown ? "observation" : "unknown", origin: this.origin, epoch: this.epoch, operation };
+		if (r.kind === "observation") Object.assign(r, observation);
+		this.persist(r); this.pending.delete(operation); this.refresh();
+	}
+	get value(): number | undefined { return !this.ready || this.persistenceUnknown ? undefined : this.average.value; }
+}
+
+type Part = { hash: ReturnType<typeof createHash>; units: number; done: boolean };
+type Item = { type: string; parts: Map<number, Part>; done: boolean; callId?: string; name?: string; namespace?: string; toolHash?: string };
+// Canonical semantic JSON is independent of whitespace/key ordering. It is
+// hashed in RAM only; never store arguments or token IDs in the native ledger.
+const canonicalJson = (value: any): string => {
+	if (Array.isArray(value)) return JSON.stringify(value.map(v => canonicalJson(v)));
+	if (value && typeof value === "object") return JSON.stringify(Object.keys(value).sort().map(k => [k, canonicalJson(value[k])]));
+	const encoded = JSON.stringify(value);
+	if (encoded === undefined) throw new Error("Non-JSON tool arguments");
+	return encoded;
+};
+const DELTAS = new Map([["response.output_text.delta", "message"], ["response.function_call_arguments.delta", "function_call"], ["response.custom_tool_call_input.delta", "custom_tool_call"]]);
+const TERMINALS = new Set(["response.completed", "response.done", "response.failed", "response.incomplete", "error"]);
+export const PRECREATED_CONTROL = new Set(["rate_limits.updated", "rate_limits", "codex.rate_limits", "session.created", "session.updated", "ping", "pong", "response.queued", "response.in_progress"]);
+/** Stream identity/clock validation is shared; LIVE content validation and
+ * native usage validation are NOT. Unsupported output never loses native usage.
  */
 export class CodexMeasurement {
-	window = new OutputWindow();
+	window: OutputWindow;
 	requestTime: number | undefined;
 	responseId: string | undefined;
 	sequence: number | undefined;
 	items = new Map<string, Item>();
-	textHash = createHash("sha256");
-	textChars = 0;
 	invalid = false;
+	liveInvalid = false;
 	terminal = false;
 	completed = false;
-	hasOtherOutput = false;
 	nativeTokens: number | undefined;
-	reasoningTokens: number | undefined;
+	fullMs: number | undefined;
 	inputTokens: number | undefined;
 	cachedTokens: number | undefined;
-	fullMs: number | undefined;
 	lastEvent: number | undefined;
+	terminalTime: number | undefined;
 	model: string;
-	constructor(model: string) { this.model = model; }
-
+	providerId = "openai-codex";
+	api = "openai-codex-responses";
+	actual = false;
+	retryUnknown = false;
+	private priorTokens = 0;
+	private usedResponses = new Set<string>();
+	private precursorId: string | undefined;
+	private precursorSequence: number | undefined;
+	private resolver: TokenizerResolver;
+	private frozen = false;
+	private liveTextHash: string | undefined;
+	private frozenLive: number | undefined;
+	constructor(model: string, resolver: TokenizerResolver = resolveReferenceTokenizer) { this.model = model; this.resolver = resolver; this.window = new OutputWindow(resolver); }
+	private rejectLive(reason: string): void { this.liveInvalid = true; this.window.fail(reason); }
+	attribute(provider: string, api: string, model: string): void {
+		if (this.frozen) return;
+		if (![provider, api, model].every(identifier) || api !== "openai-codex-responses") { this.invalid = true; return; }
+		if (this.actual && (provider !== this.providerId || api !== this.api || model !== this.model)) this.invalid = true;
+		else { this.providerId = provider; this.api = api; this.model = model; this.actual = true; }
+	}
 	provider(data: Json, t: number): void {
-		if (!Number.isFinite(t) || t < 0 || (this.lastEvent !== undefined && t < this.lastEvent)) this.invalid = true;
+		if (this.frozen) return;
+		if (!time(t) || (this.lastEvent !== undefined && t < this.lastEvent) || (this.requestTime !== undefined && t < this.requestTime)) this.invalid = true;
 		this.lastEvent = t;
-		if (data.type === "response.created") {
-			// Only a different response ID constitutes a retry, not duplicate created.
-			const id = data.response?.id;
-			if (this.responseId && id !== this.responseId) {
-				const requestTime = this.requestTime;
-				Object.assign(this, new CodexMeasurement(this.model)); this.requestTime = requestTime; this.lastEvent = t;
-			} else if (this.responseId) this.invalid = true;
-			this.responseId = typeof id === "string" && id.length ? id : undefined;
-			if (!this.responseId) this.invalid = true;
+		if (!data || typeof data.type !== "string") { this.invalid = true; return; }
+		const type = data.type, response = data.response;
+		const controlId = PRECREATED_CONTROL.has(type) ? response?.id ?? data.response_id : undefined;
+		if (this.terminal && this.responseId && identifier(controlId) && controlId !== this.responseId) {
+			// A retry can deliver queued/in-progress metadata BEFORE its created
+			// event. Keep that response's identity/sequence separate from the old
+			// attempt; usage coverage is decided when created actually arrives.
+			if (this.precursorId && this.precursorId !== controlId) this.invalid = true;
+			this.precursorId = controlId;
+			if (data.sequence_number !== undefined) {
+				if (!counter(data.sequence_number) || (this.precursorSequence !== undefined && data.sequence_number !== this.precursorSequence + 1)) this.invalid = true;
+				else this.precursorSequence = data.sequence_number;
+			}
+			return;
 		}
-		if (!this.responseId || !Number.isFinite(t) || t < 0 || (this.requestTime !== undefined && t < this.requestTime)) this.invalid = true;
-		if (this.terminal && data.type !== "response.created") this.invalid = true;
+		if (type === "response.created") {
+			const id = response?.id;
+			if (!identifier(id) || id === this.responseId || this.usedResponses.has(id)) this.invalid = true;
+			if (this.responseId && id !== this.responseId) {
+				if (!this.terminal || this.nativeTokens === undefined) this.retryUnknown = true;
+				else if (!counter(this.priorTokens + this.nativeTokens)) this.retryUnknown = true;
+				else this.priorTokens += this.nativeTokens;
+				this.window.clearContent(); this.window = new OutputWindow(this.resolver); this.items.clear(); this.liveInvalid = false;
+				this.nativeTokens = undefined; this.fullMs = undefined; this.terminalTime = undefined; this.terminal = false; this.completed = false; this.sequence = this.precursorSequence;
+			}
+			if (this.precursorId && this.precursorId !== id) this.invalid = true;
+			this.precursorId = undefined; this.precursorSequence = undefined; this.responseId = identifier(id) ? id : undefined;
+			if (this.responseId) this.usedResponses.add(this.responseId);
+		} else if (!this.responseId) {
+			if (!PRECREATED_CONTROL.has(type)) { this.invalid = true; return; }
+			const id = response?.id ?? data.response_id;
+			if (id !== undefined) {
+				if (!identifier(id) || (this.precursorId && this.precursorId !== id)) this.invalid = true;
+				else this.precursorId = id;
+			}
+		}
 		if (data.sequence_number !== undefined) {
 			if (!counter(data.sequence_number) || (this.sequence !== undefined && data.sequence_number !== this.sequence + 1)) this.invalid = true;
 			else this.sequence = data.sequence_number;
 		}
-		if (data.response_id !== undefined && data.response_id !== this.responseId) this.invalid = true;
-		const response = data.response;
-		if (response?.id !== undefined && response.id !== this.responseId) this.invalid = true;
-		if (data.type === "response.output_item.added") {
+		if (this.responseId && ((data.response_id !== undefined && data.response_id !== this.responseId) || (response?.id !== undefined && response.id !== this.responseId))) this.invalid = true;
+		if (this.terminal && !PRECREATED_CONTROL.has(type)) this.invalid = true;
+		if (type === "response.output_item.added") {
 			const item = data.item;
-			if (typeof item?.id !== "string" || this.items.has(item.id) || this.terminal || this.items.size >= 256) { this.invalid = true; return; }
-			this.items.set(item.id, { type: item.type, parts: new Map(), done: false });
-			if (!["message", "reasoning", "function_call", "custom_tool_call"].includes(item.type)) this.hasOtherOutput = true;
+			if (!identifier(item?.id) || this.items.has(item.id) || !identifier(item.type) || this.terminal) { this.rejectLive("malformed-item"); return; }
+			if (this.items.size >= 256) { this.rejectLive("item-limit"); return; }
+			this.items.set(item.id, { type: item.type, parts: new Map(), done: false, callId: item.call_id, name: item.name, namespace: item.namespace });
+			if (!["message", "reasoning", "function_call", "custom_tool_call"].includes(item.type)) this.rejectLive("unsupported-output");
 		}
-		if (["response.output_text.delta", "response.function_call_arguments.delta", "response.custom_tool_call_input.delta"].includes(data.type)) {
-			if (typeof data.delta !== "string") { this.invalid = true; return; }
-			if (!data.delta.length) return;
-			const item = this.items.get(data.item_id);
-			const expectedType = data.type === "response.output_text.delta" ? "message" : data.type === "response.function_call_arguments.delta" ? "function_call" : "custom_tool_call";
-			if (!item || item.type !== expectedType || item.done || this.terminal) { this.invalid = true; return; }
-			const index = expectedType === "message" ? data.content_index : 0;
-			if (!counter(index) || index >= 64) { this.invalid = true; return; }
-			const part = item.parts.get(index) ?? { hash: createHash("sha256"), chars: 0, done: false };
-			if (part.done) { this.invalid = true; return; }
-			part.hash.update(data.delta, "utf16le"); part.chars += data.delta.length; item.parts.set(index, part);
-			this.window.add(t, data.delta.length);
-			if (expectedType === "message") { this.textHash.update(data.delta, "utf16le"); this.textChars += data.delta.length; }
+		if (DELTAS.has(type)) {
+			const expected = DELTAS.get(type), item = this.items.get(data.item_id);
+			const index = expected === "message" ? data.content_index : 0;
+			if (typeof data.delta !== "string" || !item || item.type !== expected || item.done || this.terminal || !counter(index) || index >= 64) { this.rejectLive("malformed-content"); return; }
+			const part = item.parts.get(index) ?? { hash: createHash("sha256"), units: 0, done: false };
+			if (part.done) { this.rejectLive("content-after-done"); return; }
+			part.hash.update(data.delta, "utf16le"); part.units += data.delta.length; item.parts.set(index, part);
+			this.window.append(`${data.item_id}/${index}`, data.delta);
 		}
-		if (data.type === "response.output_text.done") {
-			const part = this.items.get(data.item_id)?.parts.get(data.content_index);
-			if (!part || part.done || typeof data.text !== "string" || part.hash.copy().digest("hex") !== hash(data.text)) this.invalid = true;
+		if (["response.output_text.done", "response.function_call_arguments.done", "response.custom_tool_call_input.done"].includes(type)) {
+			const index = type === "response.output_text.done" ? data.content_index : 0;
+			const part = this.items.get(data.item_id)?.parts.get(index);
+			const text = type === "response.output_text.done" ? data.text : type === "response.function_call_arguments.done" ? data.arguments : data.input;
+			if (!part || part.done || typeof text !== "string" || part.hash.copy().digest("hex") !== hash(text)) this.rejectLive("done-hash-mismatch");
 			if (part) part.done = true;
 		}
-		if (data.type === "response.output_item.done") {
+		if (type === "response.output_item.done") {
 			const item = this.items.get(data.item?.id);
-			if (!item || item.done || item.type !== data.item.type || this.terminal) { this.invalid = true; return; }
+			if (!item || item.done || item.type !== data.item?.type || this.terminal) { this.rejectLive("item-done-mismatch"); return; }
 			if (item.type === "message") {
-				if (data.item.role !== undefined && data.item.role !== "assistant") this.invalid = true;
-				const contents = data.item.content;
-				if (!Array.isArray(contents) || contents.length !== item.parts.size) this.invalid = true;
-				for (const [index, part] of item.parts) {
-					const text = contents?.[index]?.text;
-					if (typeof text !== "string" || part.hash.copy().digest("hex") !== hash(text)) this.invalid = true;
-				}
-			} else if (item.type === "function_call" || item.type === "custom_tool_call") {
-				const text = item.type === "function_call" ? data.item.arguments : data.item.input;
-				const part = item.parts.get(0);
-				if (!part || typeof text !== "string" || part.hash.copy().digest("hex") !== hash(text)) this.invalid = true;
+				const content = data.item.content;
+				if (data.item.role !== undefined && data.item.role !== "assistant") this.rejectLive("item-role");
+				if (!Array.isArray(content) || content.length !== item.parts.size || content.some((p: Json) => p.type !== "output_text")) this.rejectLive("unsupported-message-content");
+				for (const [index, part] of item.parts) if (typeof content?.[index]?.text !== "string" || part.hash.copy().digest("hex") !== hash(content[index].text)) this.rejectLive("item-text-hash");
+			} else if (["function_call", "custom_tool_call"].includes(item.type)) {
+				const text = item.type === "function_call" ? data.item.arguments : data.item.input, part = item.parts.get(0);
+				if (!part || typeof text !== "string" || part.hash.copy().digest("hex") !== hash(text)) this.rejectLive("item-tool-hash");
+				if (!identifier(data.item.call_id) || !identifier(data.item.name)
+					|| (item.callId !== undefined && item.callId !== data.item.call_id)
+					|| (item.name !== undefined && item.name !== data.item.name)
+					|| (item.namespace !== undefined && item.namespace !== data.item.namespace)) this.rejectLive("item-tool-identity");
+				item.callId = data.item.call_id; item.name = data.item.name; item.namespace = data.item.namespace;
+				try { item.toolHash = item.type === "function_call" ? hash(canonicalJson(JSON.parse(text))) : hash(text); }
+				catch { this.rejectLive("item-tool-json"); }
 			}
 			item.done = true;
 		}
-		if (["response.completed", "response.done", "response.failed", "response.incomplete", "error"].includes(data.type)) {
-			if (this.terminal) this.invalid = true;
-			this.terminal = true;
-			this.completed = ["response.completed", "response.done"].includes(data.type) && response?.status === "completed";
-			const output = response?.usage?.output_tokens;
-			const reasoning = response?.usage?.output_tokens_details?.reasoning_tokens;
-			if (counter(output) && counter(reasoning) && reasoning <= output) { this.nativeTokens = output - reasoning; this.reasoningTokens = reasoning; }
+		if (TERMINALS.has(type)) {
+			this.terminal = true; this.terminalTime = t; this.completed = ["response.completed", "response.done"].includes(type) && response?.status === "completed";
+			// Raw total includes reasoning; absent details do not invalidate it.
+			if (identifier(response?.id) && response.id === this.responseId && counter(response?.usage?.output_tokens)) this.nativeTokens = response.usage.output_tokens;
 			if (counter(response?.usage?.input_tokens)) this.inputTokens = response.usage.input_tokens;
-			if (counter(response?.usage?.input_tokens_details?.cached_tokens) && this.inputTokens !== undefined && response.usage.input_tokens_details.cached_tokens <= this.inputTokens) this.cachedTokens = response.usage.input_tokens_details.cached_tokens;
+			const cached = response?.usage?.input_tokens_details?.cached_tokens;
+			if (counter(cached) && this.inputTokens !== undefined && cached <= this.inputTokens) this.cachedTokens = cached;
 			if (this.requestTime !== undefined) this.fullMs = t - this.requestTime;
 		}
 	}
+	checkpoint(t: number): number | undefined { return this.invalid || this.liveInvalid ? undefined : this.window.checkpoint(this.terminalTime ?? t); }
+	freeze(t: number): void {
+		if (this.frozen) return;
+		// Cut LIVE at the raw terminal, not at delayed message/turn callbacks.
+		if (!this.invalid && !this.liveInvalid) this.window.checkpoint(this.terminalTime ?? t, true);
+		if (!this.window.invalid) {
+			const texts: string[] = [];
+			for (const [id, item] of this.items) if (item.type === "message") for (const index of [...item.parts.keys()].sort((a, b) => a - b)) texts.push(this.window.parts.get(`${id}/${index}`)?.text ?? "");
+			this.liveTextHash = hash(texts.join(""));
+		}
+		this.frozenLive = this.window.estimatedCurrent; this.window.clearContent(); this.frozen = true;
+	}
+	matches(message: Json): boolean {
+		return message?.role === "assistant" && (message.responseId === undefined ? !this.completed : message.responseId === this.responseId)
+			&& message.provider === this.providerId && message.api === this.api && (message.responseModel ?? message.model) === this.model;
+	}
 	finish(message: Json): boolean {
-		const sdkText = (Array.isArray(message.content) ? message.content : []).filter((p: Json) => p.type === "text").map((p: Json) => p.text ?? "").join("");
-		const textMatches = sdkText.length === this.textChars && hash(sdkText) === this.textHash.copy().digest("hex");
-		return this.completed && !this.invalid && !this.window.invalid && !this.hasOtherOutput && !!this.responseId
-			&& (message.responseId === undefined || message.responseId === this.responseId)
-			&& this.items.size > 0 && [...this.items.values()].every(i => i.done)
-			&& this.window.lastEstimated !== undefined && textMatches && !["error", "aborted", "length"].includes(message.stopReason);
+		const content: Json[] = Array.isArray(message.content) ? message.content : [];
+		const text = content.filter(p => p.type === "text").map(p => p.text ?? "").join("");
+		const tools = content.filter(p => p.type === "toolCall");
+		const nativeTools = [...this.items.entries()].filter(([, i]) => ["function_call", "custom_tool_call"].includes(i.type));
+		let toolsMatch = tools.length === nativeTools.length;
+		try {
+			for (let i = 0; toolsMatch && i < nativeTools.length; i++) {
+				const [id, item] = nativeTools[i], tool = tools[i];
+				if (!item.toolHash || tool.id !== `${item.callId}|${id}` || tool.name !== item.name || tool.namespace !== item.namespace) { toolsMatch = false; break; }
+				if (item.type === "function_call") toolsMatch = hash(canonicalJson(tool.arguments)) === item.toolHash;
+				else {
+					// Pi wraps grammar/custom input in exactly one declared property.
+					const args = tool.arguments, keys = args && typeof args === "object" && !Array.isArray(args) ? Object.keys(args) : [];
+					toolsMatch = keys.length === 1 && typeof args[keys[0]] === "string" && hash(args[keys[0]]) === item.toolHash;
+				}
+			}
+		} catch { toolsMatch = false; }
+		return this.frozen && this.matches(message) && this.completed && !this.invalid && !this.liveInvalid && !this.window.invalid
+			&& !["error", "aborted", "length"].includes(message.stopReason) && this.liveTextHash === hash(text) && toolsMatch
+			&& this.items.size > 0 && [...this.items.values()].every(i => i.done) && this.frozenLive !== undefined;
 	}
-	current(now: number, finalValid = false): number | undefined {
-		return this.invalid || this.window.invalid || this.hasOtherOutput || (this.terminal && !this.completed)
-			? undefined : (this.window.current(now, finalValid) ?? this.window.lastEstimated);
+	observation(message: Json): Pick<NativeRecord, "responseHash" | "provider" | "api" | "model" | "nativeTokens" | "elapsedMs"> | undefined {
+		if (!this.frozen || !this.matches(message) || this.invalid || this.retryUnknown || this.precursorId !== undefined || !this.terminal || !this.responseId || this.nativeTokens === undefined
+			|| !time(this.fullMs) || this.fullMs <= 0 || !counter(this.priorTokens + this.nativeTokens)) return undefined;
+		// The saved normalized usage, when supplied, must still match the raw
+		// terminal. A failed SDK message may have zero/default usage, so only
+		// raw native usage is authoritative for failed/incomplete operations.
+		if (this.completed && message.usage && message.usage.output !== this.nativeTokens) return undefined;
+		return { responseHash: hash([...this.usedResponses].join("\0")), provider: this.providerId, api: this.api, model: this.model, nativeTokens: this.priorTokens + this.nativeTokens, elapsedMs: this.fullMs };
 	}
+	current(t: number): number | undefined { return this.invalid || this.liveInvalid || this.window.invalid ? undefined : this.frozen ? this.frozenLive : this.checkpoint(t); }
 }
 
+/** Controller APIs are callable without a UI, for offline integration tests. */
 export class CodexThroughput {
 	active = false;
 	measurement: CodexMeasurement | undefined;
 	input = new SessionInput();
+	ledger = new NativeLedger();
 	selectedModel = "";
 	final = false;
 	finalValid = false;
-	lastRender = 0;
-	prepared = false;
-	// Last fully validated response, separate from the current window. A failed
-	// or unsupported response cannot poison this fallback with provisional TPS.
-	heldRate: number | undefined;
-	isCodex(message: Json): boolean { return message.api === "openai-codex-responses" || message.provider === "openai-codex"; }
-	start(message: Json): void {
-		const id = message.responseModel ?? message.model;
-		const key = `${message.provider}/${id}`;
-		if (this.selectedModel && this.selectedModel !== key) this.select({ id, provider: message.provider, api: message.api });
-		this.selectedModel = key;
-		if (this.prepared && this.active && this.isCodex(message)) {
-			if (this.measurement && (message.responseModel ?? message.model) !== this.measurement.model) this.measurement.invalid = true;
-			this.prepared = false; return;
-		}
-		this.active = this.isCodex(message); if (!this.active) return;
-		this.measurement = new CodexMeasurement(message.responseModel ?? message.model);
-		this.final = false; this.finalValid = false; this.lastRender = 0;
+	heldRate: number | undefined; // LAST: only a final-saved, validated LIVE observation.
+	private operation: { measurement: CodexMeasurement; id?: string; frozen: boolean } | undefined;
+	private resolver: TokenizerResolver;
+	private committedEntries = new Set<string>();
+	private untrackedRequest = false;
+	private discardedUntilPrepare = false;
+	private endedResponseKeys = new Set<string>();
+	private endedMessages = new WeakSet<object>();
+	constructor(resolver: TokenizerResolver = resolveReferenceTokenizer) { this.resolver = resolver; }
+	isCodex(message: Json): boolean { return message?.api === "openai-codex-responses" || message?.provider === "openai-codex"; }
+	bindLedger(manager: any, appendEntry: (type: string, record: NativeRecord) => void): void { this.ledger.bind(manager, appendEntry); }
+	select(model: Json | undefined): void {
+		const key = model ? `${model.provider}/${model.id}` : "";
+		if (key !== this.selectedModel) { this.reset(); this.measurement = undefined; }
+		this.selectedModel = key; this.active = !!model && this.isCodex(model);
+		// Do not erase an in-flight/frozen native operation on model_select.
 	}
 	prepare(model: Json, t: number): void {
-		this.select(model);
-		this.prepared = false; this.start({ api: model.api, provider: model.provider, model: model.id });
-		this.request(t); this.prepared = this.active; this.selectedModel = `${model.provider}/${model.id}`;
+		this.closeUnknown(); this.discardedUntilPrepare = false; this.select(model); this.final = false; this.finalValid = false;
+		this.untrackedRequest = !this.active;
+		if (!this.active) return;
+		const m = new CodexMeasurement(model.id, this.resolver); m.requestTime = t;
+		if (!time(t)) m.invalid = true;
+		this.measurement = m; this.operation = { measurement: m, id: this.ledger.begin(), frozen: false };
 	}
-	select(model: Json | undefined): void {
-		if (!model) return;
-		const key = `${model.provider}/${model.id}`;
-		if (this.selectedModel !== key) { this.measurement = undefined; this.final = false; this.finalValid = false; this.prepared = false; this.heldRate = undefined; }
-		this.selectedModel = key; this.active = this.isCodex(model);
+	start(message: Json): void {
+		if (this.discardedUntilPrepare || !this.isCodex(message)) return;
+		if (identifier(message.responseId) && this.endedResponseKeys.has(hash(`${message.provider}/${message.api}/${message.responseId}`))) return;
+		if (!this.operation) {
+			// A missing before_provider_request has no known operation duration.
+			this.select({ id: message.responseModel ?? message.model, provider: message.provider, api: message.api });
+			const m = new CodexMeasurement(message.responseModel ?? message.model, this.resolver);
+			this.operation = { measurement: m, id: this.ledger.begin(), frozen: false }; this.measurement = m;
+			this.final = false; this.finalValid = false;
+		}
+		const m = this.operation.measurement;
+		const actualKey = `${message.provider}/${message.responseModel ?? message.model}`;
+		if (actualKey !== this.selectedModel) { this.heldRate = undefined; this.selectedModel = actualKey; }
+		if (m.actual && !m.matches(message)) m.invalid = true;
+		else if (!m.actual) m.attribute(message.provider, message.api, message.responseModel ?? message.model);
+		this.untrackedRequest = false; this.active = true;
 	}
-	request(t: number): void { if (this.active && this.measurement) this.measurement.requestTime = t; }
-	provider(data: Json, t: number): boolean {
-		if (!this.active || !this.measurement) return false;
-		this.measurement.provider(data, t);
-		const render = t - this.lastRender >= 200 || this.measurement.terminal || this.measurement.invalid;
-		if (render) this.lastRender = t;
-		return render;
+	provider(data: Json, t: number, attribution?: { provider: string; api: string; model: string }): boolean {
+		if (this.discardedUntilPrepare) return false;
+		if (!this.operation && this.untrackedRequest && attribution?.api === "openai-codex-responses") {
+			// The Pi pre-request hook exposes the selected model, not a virtual
+			// route's actual provider. An unexpected Codex route must NOT silently
+			// disappear from AVG. There was no durable pre-request Codex start:
+			// record UNKNOWN coverage, without fabricating that missing boundary.
+			const m = new CodexMeasurement(attribution.model, this.resolver); m.retryUnknown = true;
+			this.operation = { measurement: m, id: this.ledger.begin(), frozen: false }; this.measurement = m;
+			this.untrackedRequest = false; this.active = true;
+		}
+		const m = this.operation?.measurement;
+		if (!m || this.operation?.frozen) return false;
+		if (attribution) {
+			const actualKey = `${attribution.provider}/${attribution.model}`;
+			if (!m.actual && actualKey !== this.selectedModel) { this.heldRate = undefined; this.selectedModel = actualKey; }
+			m.attribute(attribution.provider, attribution.api, attribution.model);
+		}
+		m.provider(data, t);
+		// Expensive encode only at checkpoints (at most one per 200ms), not
+		// per raw delta. First content checkpoint establishes the baseline.
+		const due = m.window.lastCheckpoint === undefined ? m.window.parts.size > 0 : t - m.window.lastCheckpoint >= POLICY.cadenceMs;
+		if (due || m.invalid || m.liveInvalid) m.checkpoint(t);
+		return due || m.terminal || m.invalid || m.liveInvalid;
 	}
-	end(message: Json): void {
-		if (!this.active || !this.measurement || this.final) return;
-		this.final = true; this.finalValid = this.measurement.finish(message);
-		if (this.finalValid) this.heldRate = this.measurement.window.lastEstimated;
+	end(message: Json, t = performance.now()): void {
+		if (this.discardedUntilPrepare || message?.role !== "assistant" || this.endedMessages.has(message)) return;
+		const op = this.operation;
+		if (!op || op.frozen) return;
+		const m = op.measurement;
+		if (identifier(message.responseId)) {
+			const key = hash(`${message.provider}/${message.api}/${message.responseId}`);
+			if (this.endedResponseKeys.has(key) || (m.responseId !== undefined && message.responseId !== m.responseId)) return;
+		}
+		if (m.actual && (message.provider !== m.providerId || message.api !== m.api || (message.responseModel ?? message.model) !== m.model)) return;
+		this.untrackedRequest = false; this.endedMessages.add(message);
+		if (identifier(message.responseId)) this.endedResponseKeys.add(hash(`${message.provider}/${message.api}/${message.responseId}`));
+		m.freeze(t); op.frozen = true; this.final = true;
+		// No commit at message_end: later handlers may replace the assistant.
+	}
+	commitSaved(messageEntryId: string, manager: any): void {
+		if (this.committedEntries.has(messageEntryId)) return;
+		const op = this.operation;
+		if (!op?.frozen) return;
+		let entry: Json | undefined;
+		try { entry = manager?.getEntry?.(messageEntryId); } catch { /* unknown */ }
+		const message = entry?.type === "message" ? entry.message : undefined;
+		if (message && identifier(message.responseId) && message.responseId !== op.measurement.responseId
+			&& this.endedResponseKeys.has(hash(`${message.provider}/${message.api}/${message.responseId}`))) return;
+		this.committedEntries.add(messageEntryId);
+		this.finalValid = !!message && op.measurement.finish(message);
+		if (this.finalValid && this.measurement === op.measurement) this.heldRate = op.measurement.current(0);
+		this.ledger.end(op.id, message ? op.measurement.observation(message) : undefined); this.operation = undefined;
+	}
+	closeUnknown(): void {
+		this.untrackedRequest = false;
+		if (!this.operation) return;
+		this.operation.measurement.window.clearContent(); this.ledger.end(this.operation.id); this.operation = undefined;
+		this.finalValid = false; this.final = true;
 	}
 	reset(): void {
-		this.heldRate = undefined;
-		if (this.final) this.measurement = undefined;
-		else if (this.measurement) this.measurement.window = new OutputWindow();
-		this.final = false; this.finalValid = false;
+		this.heldRate = undefined; this.finalValid = false;
+		if (this.measurement) {
+			this.measurement.window.clearContent();
+			// Current-only reset cannot splice pre-reset content into a new BPE
+			// prefix. LIVE stays unknown until the next request; native survives.
+			this.measurement.window.fail("current-reset-until-next-request");
+		}
+	}
+	resetAverage(): void {
+		// Raw WS created may precede SDK message_start. Every late event of this
+		// pre-reset operation is barred until an actual new pre-request boundary.
+		this.discardedUntilPrepare ||= !!this.operation || this.untrackedRequest;
+		this.closeUnknown(); this.ledger.reset();
 	}
 	sessionReset(entries: Json[] = []): void {
-		this.active = false; this.measurement = undefined; this.prepared = false;
-		this.final = false; this.finalValid = false; this.selectedModel = ""; this.heldRate = undefined; this.input.restore(entries);
+		this.active = false; this.measurement?.window.clearContent(); this.measurement = undefined; this.operation = undefined; this.untrackedRequest = false;
+		this.final = false; this.finalValid = false; this.selectedModel = ""; this.heldRate = undefined; this.committedEntries.clear();
+		this.discardedUntilPrepare = false; this.endedResponseKeys.clear(); this.endedMessages = new WeakSet(); this.input.restore(entries);
 	}
-	render(_mode: "widget" | "status", now = performance.now()): string | undefined {
-		if (!this.active) return undefined;
+	render(_mode: "widget" | "status", now = performance.now()): string {
 		const m = this.measurement;
-		const current = this.final && !this.finalValid ? undefined : m?.current(now, this.finalValid);
-		const value = current ?? this.heldRate;
+		const live = this.active && (!this.final || this.finalValid) ? m?.current(now) : undefined;
 		const cacheHit = m?.terminal ? (m.inputTokens && m.cachedTokens !== undefined ? 100 * m.cachedTokens / m.inputTokens : NaN) : this.input.cacheHit;
-		return `${formatRate(value)} TPS ${this.input.fields(cacheHit)}`;
+		return `${formatRate(this.active ? live ?? this.heldRate : undefined)} ${formatRate(this.active ? this.ledger.value : undefined)} TPS ${this.input.fields(cacheHit)}`;
 	}
 }
