@@ -6,6 +6,8 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_DIR="${PI_CODING_AGENT_DIR:-${PI_AGENT_DIR:-$HOME/.pi/agent}}"
 export PI_CODING_AGENT_DIR="$AGENT_DIR"
+# Drop a retired key inherited from an older terminal for this deployment tree.
+unset DEEPSEEK_API_KEY
 EXT_CONFIG="$HOME/.pi/settings.json"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 
@@ -26,7 +28,7 @@ put() { # put <src> <dst>
 echo "pi-harness: раскладываю конфиги"
 
 # Templates contain Billy's Mac paths; adapt them to this account's HOME.
-# Credential sources stay machine-local (never copy auth.json or API keys).
+# Codex credential sources stay machine-local (never copy auth.json or API keys).
 put_json() {
   mkdir -p "$(dirname "$2")"
   backup "$2"
@@ -159,6 +161,7 @@ for f in "$REPO_DIR"/patches/*.mjs; do
 done
 
 echo
-echo "Готово. Ключ DeepSeek не в репе: положи его в ~/.config/deepseek.env как DEEPSEEK_API_KEY=..."
-echo "Codex: /login openai-codex. Существующие машинные провайдеры и их авторизация сохранены."
+python3 "$REPO_DIR/assets/codex-only.py" --agent-dir "$AGENT_DIR" --home "$HOME" --purge-retired-secrets
+echo "Готово. Pi настроен только на Codex; поиск — hosted web_search через pi-openai-toolkit."
+echo "Codex: /login openai-codex. Машинная OAuth-авторизация не копируется и не заменяется."
 echo "Затем перезапусти pi: для Kitty-картинок в Orca /reload недостаточно. Компактные тулы включены; Ctrl+O раскрывает вывод."

@@ -1,10 +1,10 @@
 ---
 name: Explore
-description: Находит файлы, определения и связи в коде; при необходимости проверяет документацию вебпоиском DeepSeek. Не изменяет файлы.
-model: deepseek/deepseek-flash
+description: Находит файлы, определения и связи в коде; при необходимости проверяет документацию hosted вебпоиском Codex. Не изменяет файлы.
+model: openai-codex/gpt-6.1-sol
 thinking: high
-tools: "read, bash, grep, find, ls, ext:pi-deepseek-search/web_search"
-extensions: [pi-deepseek-search]
+tools: "read, bash, grep, find, ls"
+extensions: [pi-openai-toolkit]
 isolated: false
 prompt_mode: replace
 ---

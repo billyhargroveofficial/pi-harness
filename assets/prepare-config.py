@@ -18,10 +18,12 @@ def prepare(source, home, previous=None, preserve_auth=False):
     if preserve_auth and previous:
         providers = result.setdefault('providers', {})
         for name, old in previous.get('providers', {}).items():
+            if name != 'openai-codex':
+                continue  # canonical harness is Codex-only; do not resurrect retired providers
             if name not in providers:
-                providers[name] = old  # retain machine-specific providers, e.g. Codex auth helper
+                providers[name] = old
             elif isinstance(old, dict) and 'apiKey' in old:
-                providers[name]['apiKey'] = old['apiKey']  # never replace the machine's credential source
+                providers[name]['apiKey'] = old['apiKey']  # retain the machine's Codex credential source
     return result
 
 

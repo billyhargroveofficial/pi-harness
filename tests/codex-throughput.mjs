@@ -1,146 +1,84 @@
-// Offline native Codex replay. No credentials, fetch, inference, or private text.
+// Adversarial offline replay. No credentials, content logs or model requests.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { CodexMeasurement, CodexThroughput, OutputWindow, OutputTotals, SessionInput } from '../patches/pi-live-throughput/codex-throughput.ts';
-
-const repo = dirname(dirname(fileURLToPath(import.meta.url)));
-const assistant = (text) => ({ role: 'assistant', api: 'openai-codex-responses', provider: 'openai-codex', model: 'test', stopReason: 'stop', content: [{ type: 'text', text }] });
-function fixture({ deltaTimes = [10000, 11000, 12000], terminalAt = 20000, output = 140, reasoning = 128 } = {}) {
-  const m = new CodexMeasurement('test'); m.requestTime = 0;
-  let sequence = 0;
-  const emit = (type, data, t) => m.provider({ type, sequence_number: sequence++, ...data }, t);
-  emit('response.created', { response: { id: 'r' } }, 100);
-  emit('response.output_item.added', { item: { id: 'reason', type: 'reasoning' } }, 150);
-  emit('response.reasoning_summary_text.delta', { item_id: 'reason', delta: 'hidden summary is never visible output' }, 5000);
-  emit('response.output_item.done', { item: { id: 'reason', type: 'reasoning' } }, 9000);
-  emit('response.output_item.added', { item: { id: 'm', type: 'message' } }, 9500);
-  let text = '';
-  for (const t of deltaTimes) { text += 'abcd'; emit('response.output_text.delta', { item_id: 'm', content_index: 0, delta: 'abcd' }, t); }
-  emit('response.output_text.done', { item_id: 'm', content_index: 0, text }, deltaTimes.at(-1));
-  emit('response.output_item.done', { item: { id: 'm', type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] } }, deltaTimes.at(-1) + 100);
-  emit('response.completed', { response: { id: 'r', status: 'completed', usage: { input_tokens: 100000, input_tokens_details: { cached_tokens: 0 }, output_tokens: output, output_tokens_details: { reasoning_tokens: reasoning } } } }, terminalAt);
-  return { m, text };
+import { CodexMeasurement, CodexThroughput, OutputWindow, POLICY, SessionInput, formatRate } from '../patches/pi-live-throughput/codex-throughput.ts';
+let checks = 0;
+function test(name, run) { try { run(); checks++; } catch (e) { e.message = `${name}: ${e.message}`; throw e; } }
+const assistant = text => ({ role: 'assistant', api: 'openai-codex-responses', provider: 'openai-codex', model: 'test', stopReason: 'stop', content: [{type:'text',text}] });
+function fixture({times=[10000,10500,11000,11500], deltas, output=140, reasoning=128, terminal=20000}={}) {
+ const m=new CodexMeasurement('test');m.requestTime=0;let seq=0;
+ const emit=(type,data,t)=>m.provider({type,sequence_number:seq++,...data},t);
+ emit('response.created',{response:{id:'r'}},100);
+ emit('response.output_item.added',{item:{id:'reason',type:'reasoning'}},150);
+ emit('response.reasoning_summary_text.delta',{item_id:'reason',delta:'summary not output'},5000);
+ emit('response.output_item.done',{item:{id:'reason',type:'reasoning'}},9000);
+ emit('response.output_item.added',{item:{id:'m',type:'message'}},9500);
+ let text=''; for(let i=0;i<times.length;i++){const delta=deltas?.[i]??'abcd'.repeat(10);text+=delta;emit('response.output_text.delta',{item_id:'m',content_index:0,delta},times[i]);}
+ emit('response.output_text.done',{item_id:'m',content_index:0,text},times.at(-1));
+ emit('response.output_item.done',{item:{id:'m',type:'message',role:'assistant',content:[{type:'output_text',text}]}},times.at(-1)+10);
+ emit('response.completed',{response:{id:'r',status:'completed',usage:{input_tokens:100000,input_tokens_details:{cached_tokens:90000},output_tokens:output,output_tokens_details:{reasoning_tokens:reasoning}}}},terminal);
+ return {m,text,emit};
 }
-
-const f = fixture();
-assert.equal(f.m.finish(assistant(f.text)), true);
-assert.equal(f.m.nativeTokens, 12, 'hidden reasoning subtracted');
-assert.equal(f.m.window.spanMs, 2000, 'first-to-last delta, no TTFT or terminal tail');
-assert.equal(f.m.window.first - f.m.requestTime, 10000, 'reasoning summary does not start visible TTFT');
-assert.equal(f.m.nativeTokens / (f.m.window.spanMs / 1000), 6);
-assert.equal(f.m.fullMs, 20000);
-const slowTail = fixture({ terminalAt: 900000 });
-assert.equal(slowTail.m.nativeTokens / slowTail.m.window.spanMs, f.m.nativeTokens / f.m.window.spanMs);
-assert.equal(slowTail.m.window.estimatedCurrent, f.m.window.estimatedCurrent, 'terminal usage never becomes an output burst');
-const oneRead = fixture({ deltaTimes: [10000, 10000, 10000] });
-assert.equal(oneRead.m.finish(assistant(oneRead.text)), false, 'one coalesced timestamp has no measurable span');
-assert.equal(oneRead.m.window.estimatedCurrent, undefined);
-const missingReasoning = fixture({ reasoning: undefined });
-// Remove the actual native reasoning count (default args would restore it).
-missingReasoning.m.nativeTokens = undefined;
-assert.equal(missingReasoning.m.finish(assistant(missingReasoning.text)), false);
-const wrongId = fixture(); wrongId.m.provider({ type: 'response.in_progress', response_id: 'other' }, 21000);
-assert.equal(wrongId.m.finish(assistant(wrongId.text)), false);
-const wrongSequence = fixture(); wrongSequence.m.provider({ type: 'response.in_progress', sequence_number: 0 }, 21000);
-assert.equal(wrongSequence.m.finish(assistant(wrongSequence.text)), false);
-assert.equal(f.m.finish(assistant(f.text + 'lost delta')), false);
-assert.equal(f.m.finish({ ...assistant(f.text), stopReason: 'aborted' }), false);
-
-const w = new OutputWindow();
-w.add(0, 40); w.add(1000, 40);
-assert.equal(w.estimatedCurrent, 10);
-assert.equal(w.estimatedCurrent, 10, 'idle rendering does not age window into zero');
-w.add(11000, 40);
-assert.equal(w.estimatedCurrent, 1, 'a real 10s pause within output counts on resumption');
-const pools = new OutputTotals();
-pools.add('a', 10, 1000); pools.add('a', 180, 3000); pools.add('b', 90, 1000);
-assert.equal(pools.average('a'), 47.5, 'token/time weighted, not arithmetic mean of per-call TPS');
-assert.equal(pools.average('b'), 90, 'different models do not mix');
-
-const display = new CodexThroughput();
-display.prepare({ id: 'test', api: 'openai-codex-responses', provider: 'openai-codex' }, 0);
-display.provider({ type: 'response.created', response: { id: 'r' } }, 100);
-const prepared = display.measurement;
-display.start(assistant(''));
-assert.equal(display.measurement, prepared, 'WS raw created before message_start is preserved');
-display.measurement = f.m;
-display.end(assistant(f.text));
-assert.equal(display.totals.average('test'), 6);
-const finalLine = display.render('status');
-assert.match(finalLine, /momentum ~[\d.]+ TPS ● cumulative 6.0 TPS/);
-display.prepare({ id: 'test', api: 'openai-codex-responses', provider: 'openai-codex' }, 30000);
-assert.match(display.render('status'), /momentum ~[\d.]+ TPS ● cumulative 6.0 TPS/);
-assert.doesNotMatch(display.render('status'), /momentum (?:~)?0(?:\.0)? /, 'next response waiting retains current');
-display.reset();
-assert.equal(display.totals.average('test'), undefined);
-assert.equal(display.measurement.requestTime, 30000, 'reset does not invent suffix native usage');
-display.sessionReset(); assert.equal(display.render('status'), undefined);
-
-// Session input includes cached tokens and all stored branches, including
-// pre-compaction entries. Usage is restored after reload; text is never read.
-const sessionInput = new SessionInput();
-const a = { role: 'assistant', responseId: 'old-a', usage: { input: 100, cacheRead: 900, cacheWrite: 0 } };
-const b = { role: 'assistant', responseId: 'old-b', usage: { input: 200, cacheRead: 1700, cacheWrite: 100 } };
-const entries = [{ type: 'message', message: a }, { type: 'compaction', summary: 'not read' }, { type: 'message', message: b }];
-sessionInput.restore(entries);
-assert.equal(sessionInput.tokens, 3000);
-assert.equal(sessionInput.cacheHit, 85);
-sessionInput.add(a); assert.equal(sessionInput.tokens, 3000, 'same object not counted twice');
-sessionInput.add({ ...a }); assert.equal(sessionInput.tokens, 3000, 'same response ID not counted twice');
-const c = { role: 'assistant', responseId: 'new-c', usage: { input: 260, cacheRead: 18176, cacheWrite: 0 } };
-sessionInput.add(c);
-assert.equal(sessionInput.tokens, 21436, 'sum of requests, not current context');
-assert.match(sessionInput.fields(), /cache hit 98.6% ● session input 21.4k/);
-sessionInput.restore([...entries, { type: 'message', message: c }]);
-assert.equal(sessionInput.tokens, 21436, 'reload/compaction does not reset total');
-sessionInput.restore([]); assert.equal(sessionInput.tokens, 0, 'new session is independent');
-
-// Raw native function arguments use the same non-reasoning delivery metric;
-// execution results are never in this response's window.
-const tool = new CodexMeasurement('tool'); tool.requestTime = 0;
-tool.provider({ type: 'response.created', response: { id: 'r' } }, 100);
-tool.provider({ type: 'response.output_item.added', item: { type: 'function_call', id: 'f' } }, 200);
-tool.provider({ type: 'response.function_call_arguments.delta', item_id: 'f', delta: '{"x":' }, 1000);
-tool.provider({ type: 'response.function_call_arguments.delta', item_id: 'f', delta: '42}' }, 2000);
-tool.provider({ type: 'response.output_item.done', item: { type: 'function_call', id: 'f', arguments: '{"x":42}' } }, 2050);
-tool.provider({ type: 'response.completed', response: { id: 'r', status: 'completed', usage: { output_tokens: 55, output_tokens_details: { reasoning_tokens: 50 } } } }, 2100);
-assert.equal(tool.finish({ stopReason: 'toolUse', content: [{ type: 'toolCall', name: 'f', arguments: { x: 42 } }] }), true);
-assert.equal(tool.nativeTokens, 5);
-
-// Replay optional saved benchmark directories using only sanitized event
-// lengths/times, synthetic generated code and native usage. No raw logs needed.
-let replayed = 0;
-for (const base of process.argv.slice(2)) {
-  const path = resolve(base);
-  const s = JSON.parse(readFileSync(resolve(path, 'summary.json'), 'utf8'));
-  const events = JSON.parse(readFileSync(resolve(path, 'events.json'), 'utf8'));
-  const text = readFileSync(resolve(path, 'generated.ts'), 'utf8');
-  const m = new CodexMeasurement(s.model_requested); m.requestTime = 0;
-  const parts = new Map(); let cursor = 0;
-  for (const e of events) {
-    const d = { type: e.type, sequence_number: e.sequence_number ?? undefined };
-    if (e.response_id_sha256) d.response_id = e.response_id_sha256;
-    if (e.item_id_sha256) d.item_id = e.item_id_sha256;
-    if (e.content_index !== null) d.content_index = e.content_index;
-    if (e.type === 'response.created') d.response = { id: e.response_id_sha256 };
-    if (e.type === 'response.output_item.added') d.item = { id: e.item_id_sha256, type: e.item_type };
-    if (e.type === 'response.output_text.delta') {
-      d.delta = text.slice(cursor, cursor + e.delta_utf16_chars); cursor += e.delta_utf16_chars;
-      const key = `${d.item_id}:${d.content_index}`; parts.set(key, (parts.get(key) ?? '') + d.delta);
-    }
-    if (e.type === 'response.output_text.done') d.text = parts.get(`${d.item_id}:${d.content_index}`);
-    if (e.type === 'response.output_item.done') {
-      d.item = { id: e.item_id_sha256, type: e.item_type };
-      if (e.item_type === 'message') d.item.content = [{ type: 'output_text', text: parts.get(`${d.item_id}:0`) }];
-    }
-    if (['response.completed', 'response.done'].includes(e.type)) d.response = { id: e.response_id_sha256, status: 'completed', usage: s.native_usage };
-    m.provider(d, Number(BigInt(e.receive_ns)) / 1e6);
-  }
-  assert.equal(cursor, text.length);
-  assert.equal(m.finish(assistant(text)), true, path);
-  assert.ok(Math.abs(m.nativeTokens / (m.window.spanMs / 1000) - s.native_nonreasoning_over_visible_span_tps) < 1e-9);
-  replayed++;
-}
-console.log(`PASS: reasoning subtraction, first/last delta, held current, weighted/model means, IDs/text/sequence/errors, WS ordering, tools; ${replayed} saved streams replayed`);
+const valid=fixture();
+test('baseline chunk excluded',()=>{assert.equal(valid.m.window.estimatedCurrent,20);assert.equal(valid.m.nativeTokens,12);assert.equal(valid.m.finish(assistant(valid.text)),true);});
+test('native totals never rescale visible rate',()=>{const f=fixture({output:1000000,reasoning:0});assert.equal(f.m.window.estimatedCurrent,20);assert.equal(f.m.finish(assistant(f.text)),true);});
+test('missing reasoning metadata cannot inflate rate',()=>{const f=fixture();f.m.nativeTokens=undefined;assert.equal(f.m.finish(assistant(f.text)),true);assert.equal(f.m.window.estimatedCurrent,20);});
+test('terminal tail ignored',()=>assert.equal(fixture({terminal:900000}).m.window.estimatedCurrent,20));
+test('reported 222919.7 TPS reproduction rejected',()=>{const w=new OutputWindow();w.add(1000,40);w.add(1000.0448592,40);assert.equal(w.estimatedCurrent,undefined);});
+test('one-shot nonstream response rejected',()=>assert.equal(fixture({times:[10000]}).m.finish(assistant('abcd'.repeat(10))),false));
+test('same timestamp burst rejected',()=>assert.equal(fixture({times:[10000,10000,10000,10000]}).m.window.estimatedCurrent,undefined));
+test('microsecond burst rejected',()=>assert.equal(fixture({times:[10000,10000.001,10000.002,10000.003]}).m.window.estimatedCurrent,undefined));
+test('short 999ms stream rejected',()=>assert.equal(fixture({times:[10000,10333,10666,10999]}).m.window.estimatedCurrent,undefined));
+test('boundary 1000ms admitted',()=>assert.equal(fixture({times:[10000,10333,10666,11000]}).m.window.estimatedCurrent,30));
+test('too few independent buckets rejected',()=>assert.equal(fixture({times:[10000,11000,12000]}).m.window.estimatedCurrent,undefined));
+test('minimum observed chars enforced',()=>assert.equal(fixture({deltas:['a','a','a','a']}).m.window.estimatedCurrent,undefined));
+test('dominant last burst rejected',()=>assert.equal(fixture({deltas:['abcd'.repeat(10),'a','b','x'.repeat(4000)]}).m.window.reason,'burst-dominated'));
+test('above policy ceiling rejected not clamped',()=>{const w=new OutputWindow();for(let i=0;i<5;i++)w.add(i*500,4000);assert.equal(w.estimatedCurrent,undefined);assert.equal(w.reason,'outside-display-policy');});
+test('genuine fast distributed observation retained',()=>{const w=new OutputWindow();for(let i=0;i<5;i++)w.add(i*500,1000);assert.equal(w.estimatedCurrent,500);});
+test('long output pauses count on resumption',()=>{const w=new OutputWindow();for(let i=0;i<5;i++)w.add(i*500,40);w.add(11000,40);assert.equal(w.estimatedCurrent,undefined);assert.equal(w.current(11001),undefined);for(let i=1;i<=4;i++)w.add(11000+i*500,40);assert.ok(w.estimatedCurrent<20);w.add(13500,40);w.add(14000,40);assert.equal(w.estimatedCurrent,20);});
+test('stale in-flight observation expires',()=>{assert.equal(valid.m.window.current(11500),20);assert.equal(valid.m.window.current(14501),undefined);});
+test('completed observation can remain idle',()=>assert.equal(valid.m.window.current(900000,true),20));
+test('clock rollback rejected',()=>{const w=new OutputWindow();w.add(100,40);w.add(99,40);assert.equal(w.invalid,true);assert.equal(w.current(1000,true),undefined);});
+for(const t of [NaN,Infinity,-1])test(`invalid time ${t}`,()=>{const w=new OutputWindow();w.add(t,40);assert.equal(w.invalid,true);});
+for(const n of [NaN,Infinity,-1,1.5,Number.MAX_SAFE_INTEGER+1])test(`invalid character count ${n}`,()=>{const w=new OutputWindow();w.add(0,n);assert.equal(w.invalid,true);});
+test('empty delta ignored',()=>{const w=new OutputWindow();w.add(0,0);assert.equal(w.first,undefined);});
+test('bounded samples under callback flood',()=>{const w=new OutputWindow();for(let i=0;i<30000;i++)w.add(i,1);assert.ok(w.samples.length<=63);});
+test('UTF16 surrogate hashes stable across split',()=>{const text='Привет 世界 😀'.repeat(16);const deltas=[text.slice(0,40),text.slice(40,80),text.slice(80,120),text.slice(120)];const f=fixture({deltas});assert.equal(f.m.finish(assistant(f.text)),true);});
+test('lost SDK text rejected',()=>assert.equal(valid.m.finish(assistant(valid.text+'lost')),false));
+for(const stopReason of ['error','aborted','length'])test(`stop ${stopReason} rejected`,()=>assert.equal(valid.m.finish({...assistant(valid.text),stopReason}),false));
+test('response ID mismatch rejected',()=>{const f=fixture();f.emit('response.in_progress',{response_id:'other'},20001);assert.equal(f.m.current(20001,true),undefined);});
+test('duplicate sequence rejected immediately',()=>{const f=fixture();f.m.provider({type:'response.in_progress',sequence_number:0},20001);assert.equal(f.m.current(20001,true),undefined);});
+test('duplicate created does not reset invalidity',()=>{const f=fixture();f.emit('response.created',{response:{id:'r'}},20001);assert.equal(f.m.invalid,true);});
+test('retry with new ID starts empty',()=>{const f=fixture();f.emit('response.created',{response:{id:'retry'}},20001);assert.equal(f.m.invalid,false);assert.equal(f.m.window.estimatedCurrent,undefined);assert.equal(f.m.responseId,'retry');});
+test('native failed/incomplete immediately hidden',()=>{for(const type of ['response.failed','response.incomplete','error']){const m=new CodexMeasurement('test');m.provider({type:'response.created',response:{id:'r'}},0);m.provider({type,response:{id:'r',status:'failed'}},1);assert.equal(m.current(1),undefined);}});
+test('deltas before created invalid',()=>{const m=new CodexMeasurement('test');m.provider({type:'response.output_text.delta',item_id:'x',content_index:0,delta:'abc'},1);assert.equal(m.invalid,true);});
+test('unknown multimodal/hosted output rejects TPS',()=>{const f=fixture();f.m.hasOtherOutput=true;assert.equal(f.m.current(20000,true),undefined);});
+test('malformed delta rejects TPS',()=>{const m=new CodexMeasurement('test');m.provider({type:'response.created',response:{id:'r'}},0);m.provider({type:'response.output_text.delta',delta:123},1);assert.equal(m.invalid,true);});
+test('tool argument stream measured once; done snapshot never adds volume',()=>{const m=new CodexMeasurement('test');m.provider({type:'response.created',response:{id:'r'}},0);m.provider({type:'response.output_item.added',item:{type:'function_call',id:'f'}},1);const deltas=Array(4).fill('x'.repeat(40));for(let i=0;i<4;i++)m.provider({type:'response.function_call_arguments.delta',item_id:'f',delta:deltas[i]},1000+i*500);m.provider({type:'response.function_call_arguments.done',item_id:'f',arguments:deltas.join('')},2501);assert.equal(m.window.chars,160);m.provider({type:'response.output_item.done',item:{type:'function_call',id:'f',arguments:deltas.join('')}},2502);m.provider({type:'response.completed',response:{id:'r',status:'completed'}},2503);assert.equal(m.finish({...assistant(''),content:[],stopReason:'toolUse'}),true);assert.equal(m.window.estimatedCurrent,20);});
+test('missing tool args verification rejects',()=>{const m=new CodexMeasurement('test');m.provider({type:'response.created',response:{id:'r'}},0);m.provider({type:'response.output_item.added',item:{type:'function_call',id:'f'}},1);m.provider({type:'response.output_item.done',item:{type:'function_call',id:'f',arguments:'{}'}},2);assert.equal(m.invalid,true);});
+const display=new CodexThroughput();
+test('WS-created before message_start preserved',()=>{display.prepare({id:'test',api:'openai-codex-responses',provider:'openai-codex'},0);display.provider({type:'response.created',response:{id:'r'}},100);const m=display.measurement;display.start(assistant(''));assert.equal(display.measurement,m);});
+test('display compact and no cumulative',()=>{display.measurement=valid.m;display.end(assistant(valid.text));assert.match(display.render('status',20000),/^~20.0 TPS hit 90.0% in 0 out 0$/);assert.doesNotMatch(display.render('status',20000),/momentum|cumulative|accumulated|●/);});
+test('next request never carries old speed',()=>{display.prepare({id:'test',api:'openai-codex-responses',provider:'openai-codex'},30000);assert.match(display.render('status',30000),/^- TPS/);});
+test('reset active window needs new observations',()=>{display.measurement=fixture().m;display.reset();assert.equal(display.measurement.window.estimatedCurrent,undefined);assert.equal(display.measurement.requestTime,0);});
+test('model/provider switch clears TPS',()=>{display.select({id:'test',provider:'another',api:'other'});assert.equal(display.measurement,undefined);assert.equal(display.render('status'),undefined);});
+test('session reset clears rate and usage',()=>{display.sessionReset();assert.equal(display.input.outputTokens,0);assert.equal(display.input.tokens,0);});
+const input=new SessionInput();
+const a={role:'assistant',provider:'p',responseId:'a',usage:{input:100,cacheRead:900,cacheWrite:0,output:229000}};
+const b={role:'assistant',provider:'p',responseId:'b',usage:{input:200,cacheRead:1700,cacheWrite:100,output:10}};
+test('session in/out counts and cache hit',()=>{input.restore([{type:'message',message:a},{type:'compaction',summary:'not read'},{type:'message',message:b}]);assert.equal(input.tokens,3000);assert.equal(input.outputTokens,229010);assert.equal(input.cacheHit,85);assert.match(input.fields(),/^hit 85.0% in 3.0k out 229.0k$/);});
+test('message object and response-ID dedup',()=>{input.add(a);input.add({...a});assert.equal(input.outputTokens,229010);assert.equal(input.tokens,3000);});
+test('history entry ID dedup',()=>{input.restore([{type:'message',id:'e',message:a},{type:'message',id:'e',message:{...a,responseId:undefined}}]);assert.equal(input.tokens,1000);assert.equal(input.outputTokens,229000);assert.match(input.fields(),/out 229k$/);});
+test('all branches and precompaction restored',()=>{input.restore([{type:'message',message:a},{type:'compaction'},{type:'message',message:b}]);assert.equal(input.outputTokens,229010);});
+test('auxiliary usage, compaction, branch summaries and tool calls counted once',()=>{const u={input:10,cacheRead:20,cacheWrite:0,output:5};input.restore([{type:'message',message:a},{type:'usage',id:'warm',usage:u},{type:'usage',id:'warm',usage:u},{type:'compaction',usage:u},{type:'branch_summary',usage:u},{type:'message',message:{role:'toolResult',usage:u}}]);assert.equal(input.tokens,1120);assert.equal(input.outputTokens,229020);assert.equal(input.cacheHit,90);});
+test('missing output metadata not silently counted as zero',()=>{input.restore([]);input.add({...a,usage:{input:100,cacheRead:900,cacheWrite:0}});assert.equal(input.tokens,0);assert.equal(input.outputTokens,0);});
+test('SDK response identity must match',()=>assert.equal(valid.m.finish({...assistant(valid.text),responseId:'different'}),false));
+test('sequence gaps rejected',()=>{const m=new CodexMeasurement('test');m.provider({type:'response.created',sequence_number:0,response:{id:'r'}},0);m.provider({type:'response.in_progress',sequence_number:2},1);assert.equal(m.invalid,true);});
+test('invalid usage does not poison seen-ID',()=>{input.restore([]);input.add({...a,usage:{input:NaN,cacheRead:900,cacheWrite:0,output:229000}});assert.equal(input.tokens,0);input.add(a);assert.equal(input.tokens,1000);});
+test('counter overflow ignored',()=>{input.restore([]);input.tokens=Number.MAX_SAFE_INTEGER;input.add(a);assert.equal(input.tokens,Number.MAX_SAFE_INTEGER);assert.equal(input.outputTokens,0);});
+test('invalid latest usage clears old cache hit',()=>{input.restore([{type:'message',message:a},{type:'message',message:{role:'assistant',usage:{input:-1}}}]);assert.equal(input.cacheHit,undefined);assert.equal(input.tokens,1000);});
+test('cached percentage never outside range',()=>{assert.match(input.fields(120),/^hit - /);assert.match(input.fields(NaN),/^hit - /);});
+test('format rate rejects NaN/Infinity/negative/over-policy',()=>{for(const value of [NaN,Infinity,-1,222919.7,0.01])assert.equal(formatRate(value),'-');});
+// Deterministic property sweep: arbitrary adversarial burst schedules are never
+// rendered as NaN/Infinity or above policy, and no <1s two-point rate escapes.
+test('1200 randomized schedule invariants',()=>{let seed=17;const rnd=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/2**32;};for(let run=0;run<1200;run++){const w=new OutputWindow();let t=0;for(let i=0;i<80;i++){t+=rnd()<0.75?rnd():rnd()*400;w.add(t,Math.floor(rnd()*10000));const value=w.estimatedCurrent;assert.ok(value===undefined||(Number.isFinite(value)&&value>=0.05&&value<=POLICY.maxTps));if(w.samples.length<POLICY.minBuckets)assert.equal(value,undefined);}}});
+console.log(`PASS: ${checks} adversarial TPS/usage cases + 1200 schedule fuzz replays; no inference requests`);

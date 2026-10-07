@@ -1,75 +1,187 @@
-# Codex throughput in the bottom status bar
+# TPS: безопасная оценка доставки вывода (7 октября 2026)
 
-The default `pi-live-throughput` display is compact footer status:
+## Итоговый интерфейс
 
 ```text
-📁 harness-space ● GPT-6.1 Sol 272k medium 18k ● momentum ~47.6 TPS ● cumulative 48.2 TPS ● cache hit 98.6% ● session input 120.2k
+📁 harness-space · GPT-6.1 Sol 272k high 221k · ~47.4 TPS hit 90.9% in 28.00M out 229k
 ```
 
-Only four extra fields are shown. `pi-statusline` appends them to its existing
-footer through `FooterDataProvider.getExtensionStatuses()`. Fields and separators
-use the same terminal gray (palette 8) as the existing status command. Output updates do
-not re-run the external status command. Narrow panes wrap between fields so the
-last metric is not silently lost. The widget above the editor is disabled by
-default; `/throughput off|on|status|widget` remains available.
+Это пример формата, не результат нового платного запроса. `momentum` и
+`cumulative` удалены. Между основными блоками Pi — маленькая `·`; внутри метрик
+нет лишних разделителей. Цвет — тот же серый palette 8. Узкая панель переносит
+`TPS`, `hit`, `in`, `out` по полям, затем по словам. При ширине меньше одного
+слова неизбежно усечение; все строки ограничены реальной терминальной шириной.
+Claude Code сохраняет прежние большие разделители и квоту.
 
-- `momentum`: the latest measured output rate over approximately three seconds.
-  It holds while no new output is received. `~` means estimated: Codex normally
-  reports native usage only at completion. Live deltas use four characters per
-  token; on completion the last window is rescaled to the final native count.
-  Individual chunk token counts remain unavailable, so momentum retains `~`.
-- `cumulative`: total native non-reasoning output tokens / total measured stream
-  seconds, for successful validated responses of the selected model since the
-  extension loaded. Models are kept separate. It is not the arithmetic mean
-  of request TPS. Session switch, `/reload` and `/throughput reset` clear this
-  measurement pool because historical sessions lack the required timestamps.
-- `cache hit`: cached input / complete input for the latest response with known
-  usage, as a percentage. `0.0%` is a valid confirmed miss; `-` is unavailable.
-- `session input`: sum of complete request inputs in the entire session,
-  including cache reads and writes, all stored branches and pre-compaction
-  entries. It is restored from usage metadata on `/reload` and session resume.
-  It includes all models, counts repeated prompt processing on each request,
-  and is independent of current context occupancy. New sessions start at zero.
+- **`~… TPS`** — приблизительная скорость доставки текста и аргументов тулов
+  клиенту за последнее пригодное окно ответа, в условных токенах (UTF-16/4).
+  Это **не** точный native decode TPS модели. `~` сохраняется и после завершения.
+- **`- TPS`** — данных недостаточно, поток не проверен, сбой или наблюдение
+  противоречит политике отображения. Старое хорошее число не подставляется.
+- **`hit`** — cached input / complete input последнего ответа; `0.0%` означает
+  подтверждённый промах, `-` — неизвестное. Это не cache hit вывода.
+- **`in`** — сумма записанных `input + cacheRead + cacheWrite` всех запросов
+  сессии. Повторная обработка одного промпта учитывается каждый раз. Это не
+  текущая занятость контекста (`221k` в примере).
+- **`out`** — сумма записанного native `usage.output`, **включая скрытый reasoning**.
+  Помимо ответов учтены tool-result usage, cache warming, compaction и branch
+  summaries, если Pi записал usage. Обрабатываются все сохранённые ветки и
+  записи до компактизации. Не сообщённый провайдером расход восстановить нельзя.
 
-Codex final samples use `output_tokens - reasoning_tokens`. The measured span
-runs from the first to last nonempty text/tool-argument delta of the same
-response. TTFT, hidden reasoning before output, tool execution after the
-response, and the terminal tail are excluded. Pauses between deltas are included
-when the stream resumes. No render timer invents a zero-rate observation.
-Reasoning summaries are not counted as visible output. Native counts can include
-framing; the complete first chunk is in the numerator although timing begins
-at its receipt. A coalesced stream with only one timestamp has no usable rate.
+Счётчики восстанавливаются из usage на старте/resume/reload и обновляются после
+изменения журнала. IDs записей, response IDs и одинаковые объекты защищают от
+повторного учёта. Невалидные, отрицательные, дробные/несуществующие счётчики и
+переполнение safe integer не превращаются в нули или гигантские числа.
 
-The plugin timestamps `provider_stream_event` with monotonic `performance.now()`
-before Pi normalization. This observes client delivery after SSE/WebSocket
-parsing and any earlier extension handlers. The standalone benchmark timestamps
-earlier, at HTTP body reads. Neither reveals server per-token decode timing.
-IDs, sequence numbers, streamed/native/SDK text and native usage are checked.
-Failed/incomplete/unverifiable responses and unsupported hosted output types
-are excluded from the cumulative TPS; their known input usage still contributes
-to session input. No content, authentication or request settings are changed.
+## Воспроизведённый дефект
 
-Source payloads live in `patches/pi-live-throughput/`. Installation and
-`update.sh` preserve them with the idempotent, hash-guarded patches
-`fix-pi-live-throughput-codex.mjs` and `fix-pi-statusline-throughput.mjs`.
-The reviewed compact-display variant on the second host is also supported.
-Unrecognized local/upstream changes are not overwritten.
+Старая версия делила прирост последнего маленького chunk на разницу времён
+доставки callback. Два callback могут прийти практически одновременно:
+
+```js
+w.add(1000, 40);
+w.add(1000.0448592, 40);
+// v2: 222919.71323598662 TPS
+// v3: undefined -> "- TPS"
+```
+
+Дополнительное усиление происходило после `response.completed`: итоговый
+`output_tokens - reasoning_tokens` пересчитывал короткое видимое окно. Native
+usage не является точным счётчиком видимого текста: OpenAI отдельно предупреждает
+о невидимых framing/message/tool/metadata tokens. Даже корректное вычитание
+reasoning не делает такой коэффициент безопасным. В v3 итоговый billing usage
+никогда не масштабирует скорость и не добавляет timed sample.
+
+## Новая измерительная модель
+
+1. Содержательные native text/function-call/custom-tool deltas получают
+   монотонное клиентское время `performance.now()` до нормализации Pi.
+2. Callback внутри 50 ms объединяются в один bucket. Весь первый bucket —
+   baseline: его объём **исключён из числителя**, раз его получение начинает
+   измеренный интервал. Done snapshots, пустые deltas и reasoning summaries
+   ничего не прибавляют. Первый chunk не имеет наблюдённого интервала доставки.
+3. Окно — около трёх секунд; слева оставляется baseline. Скорость вычисляется как
+   `(cumulative_chars(last) - cumulative_chars(baseline)) / 4 / elapsed_seconds`.
+4. Для отображения нужны ≥1 s, ≥4 buckets и ≥32 наблюдённых символов. Если один
+   небазовый bucket даёт >80% объёма или оценка >1000 TPS, результат **отвергается**,
+   а не обрезается до предела. Эти числа — наши консервативные UI-пороги,
+   **не физические пределы Codex и не доказательство точности**.
+5. Если текущий поток молчит >3 s, показывается `-`. Таймер 500 ms только проверяет
+   устаревание/журнал, не создаёт токены и не делит вывод на время рендера.
+6. Проверенный завершённый ответ сохраняет последний пригодный TPS до нового
+   запроса, reset, смены модели или сессии. Новый запрос сразу очищает старый TPS.
+   Пауза, после которой вывод возобновляется, входит в окно, пока не состарится.
+
+Число `~` — осознанный proxy. Четыре UTF-16 единицы не равны четырём символам
+Unicode или точной токенизации: CJK, кириллица, emoji, код, JSON, escape sequences
+и разные токенизаторы дают иной коэффициент. Hash сравнивает UTF-16 байты, чтобы
+разделённые между chunks суррогатные пары не ломали проверку целостности.
+
+## Почему нельзя просто «отфильтровать выбросы»
+
+- SSE/WS chunks — события доставки, а не аппаратные timestamps отдельных токенов.
+  Буферизация прокси, HTTP/body parser, TCP, WebSocket frames, backpressure,
+  задержки event loop/GC/расширений могут сжать большую часть ответа в один burst.
+- Precise monotonic clock устраняет clock jumps и уточняет **клиентское** время,
+  но не восстанавливает момент декодирования на сервере.
+- Native output billing, hidden reasoning и видимый текст — разные множества.
+  TTFT, очередь, prefill/cache, terminal tail, выполнение тулов и idle пользователя
+  — разные интервалы, их нельзя без определения смешивать в одном TPS.
+- Настоящая speculative decoding тоже может давать многотокенные bursts.
+  Отвержение burst — недостаток наблюдаемости, не диагноз «модель врёт».
+- Медиана, EMA, winsorization, clipping или накопленная средняя могут спрятать
+  ошибку измерения. Поэтому нет smoothing, cumulative или held fallback после
+  ошибки. Неизвестное отображается как неизвестное.
+
+Даже поток, равномерно выгруженный из буфера в течение нескольких секунд, может
+пройти эти проверки. Клиент **не способен доказать server decode TPS** без
+серверных timestamps/счётчика, а policy cap скрывает и некоторые настоящие
+быстрые ответы. Здесь исправлен конкретный воспроизводимый spike и классы
+наблюдаемой невалидности; «все возможные погрешности устранены» не утверждается.
+
+## Матрица краевых случаев и наблюдаемость
+
+| Класс | Защита / результат | Проверка / предел |
+|---|---|---|
+| One-shot, одинаковые/sub-ms timestamps, <1 s, мало buckets/chars | `-`, нет деления на почти ноль | literal 222919.7 repro + boundary/fuzz |
+| Доминирующий большой chunk, uniform rate >policy | `-`, не clamp и не старое число | burst и fast-distributed fixtures |
+| Огромный native usage или поздний billing jump | влияет на `out`, не TPS | native=1M; реальный SDK parser |
+| Reasoning summaries/hidden output | summaries не timed output; native output входит в `out` | reasoning=300, output=320 |
+| Missing reasoning metadata | не масштабируем; guarded proxy возможен | native metadata absent fixture |
+| Cache reads/writes | только input; не добавляются к output | hit bounds + usage totals |
+| Первый chunk, пустой delta, repeated done snapshot | baseline/ignore; native hash подтверждает stream | fixture + surrogate split |
+| Long terminal tail, tool execution, TTFT | не timed output | delayed completed fixture |
+| Пауза между deltas / idle | пауза включается при возобновлении; live TTL | pause, stale/final hold |
+| Clock rollback, NaN, Infinity, negative/fractional/overflow | fail-closed | deterministic inputs |
+| Duplicate/out-of-order/missing sequence | consecutive seq required, когда поле есть | duplicate и seq-gap; отсутствие seq допускается |
+| Response/item/content ID mismatch, lost text, malformed fields | TPS скрыт; bounded items/parts; raw/SDK hashes | native fixtures + parser |
+| Retry / WS-created-before-message-start | новая response ID обнуляет окно; prepared measurement сохраняется | request lifecycle fixtures |
+| Error, abort, length limit, incomplete/failed terminal | TPS скрыт, известный расход остаётся | each stop reason |
+| Hosted search/image/audio/refusal/unhandled output | неизвестный output type исключает TPS | conservative unsupported-output fixture |
+| Provider/model/session change, reload, reset | rate очищен, usage восстановлен; reset не стирает usage | real extension handlers |
+| Generic provider без native hook | guarded delta-only proxy; thinking/usage snapshot игнорируются | offline generic fixture; Codex-only конфиг его не выбирает |
+| Branching, compaction, cache warming, classifier/image tool usage | recorded ledger учтён независимо от контекста | all supported entry kinds + event/idle refresh |
+| Double message end, ID/object replay | dedup | same/clone response и history entry IDs |
+| Narrow Unicode/ANSI footer, dynamic update | `·`, same gray, wrap units, no command rerun | widths 1–220; слова шире панели усекаются |
+| Burst из реального server speculative decode / evenly buffered stream | нельзя различить по client data | явно сохраняющийся предел |
+| Laptop sleep, networking delay, slow consumers | может быть отвергнут/занижен; clock не server clock | нет эмуляции каждой ОС/транспортной топологии |
+
+## Первичные источники и привязка к решениям
+
+Проверены 7 октября 2026; локальный код Pi — установленная версия, не предположение
+о latest npm. Эти источники объясняют измерительные границы, **не задают наши
+пороговые константы**.
+
+1. [NVIDIA GenAI-Perf metrics](https://docs.nvidia.com/nim/benchmarking/llm/latest/metrics.html),
+   `Inter Token Latency`: промежутки между tokens после первого, различие TTFT,
+   end-to-end latency и generation phase. Не смешиваем фазы/числители.
+2. [NVIDIA AIPerf metrics](https://docs.nvidia.com/aiperf/metrics.html),
+   `inter_token_latency`, `chunked_inter_token_latency`, `time_per_output_token`:
+   chunks и tokens — разные измерительные единицы; поэтому клиентский proxy.
+3. [OpenAI reasoning](https://developers.openai.com/api/docs/guides/reasoning/),
+   `How reasoning works`, `Controlling costs`: reasoning расходуется как output,
+   есть также invisible message/tool/metadata tokens. Не rescale native usage.
+4. [OpenAI streaming](https://developers.openai.com/api/docs/guides/streaming-responses/)
+   и [Responses streaming events](https://developers.openai.com/api/reference/resources/responses/streaming-events):
+   lifecycle/delta/done, sequence numbers, item/content indices. Не считаем snapshots
+   новыми tokens, сверяем целостность потока.
+5. [WHATWG Server-Sent Events](https://html.spec.whatwg.org/multipage/server-sent-events.html),
+   `Interpreting an event stream`: line/block buffering может задержать dispatch.
+   [WebSocket message event](https://developer.mozilla.org/en-US/docs/Web/API/WebSocket/message_event):
+   timestamp события — не timestamp каждого token в сообщении.
+6. [MDN performance.now](https://developer.mozilla.org/en-US/docs/Web/API/Performance/now),
+   monotonic clock / ticking during sleep, и [Node event loop](https://nodejs.org/en/learn/asynchronous-work/event-loop-timers-and-nexttick):
+   высокая точность часов не отменяет задержки callbacks.
+7. [NVIDIA speculative decoding](https://docs.nvidia.com/nim/large-language-models/latest/speculative-decoding.html):
+   multi-token decoding допустима; burst gate не устанавливает физическую истину.
+8. [OpenAI prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching/):
+   cached_tokens — input usage, не вывод. Cache latency не server output TPS.
+9. [NIST outliers](https://www.itl.nist.gov/div898/handbook/eda/section3/eda35h.htm):
+   investigate/label vs accommodation; не маскируем неизвестный процесс clipping.
+10. Локальный Pi: `dist/modes/interactive/components/footer.js:getSessionStats`,
+    `dist/core/agent-session.js:getSessionStats`, `session-manager.d.ts`: набор
+    recorded usage entries. Наши `in/out` не ограничены assistant messages.
+
+## Проверка и установка
 
 ```bash
 node tests/codex-throughput.mjs
 node tests/codex-throughput-extension.mjs
-# Optional replay of existing synthetic benchmark artifacts:
-node tests/codex-throughput.mjs /path/to/mac/result /path/to/brother/result
+python3 tests/statusline-session-name.py
 ```
 
-Offline verification uses the installed Pi loader and native Codex SSE parser,
-a local mock response, generated dummy JWT and fake UI. Tests cover reasoning
-subtraction, held rates, weighted/model means, IDs/text/sequence, WebSocket
-ordering, tool arguments, history/cache input totals, compact footer updates,
-wrapping, reset and both patch guards. New model calls are never made.
+Первый тест: adversarial cases и 1200 детерминированных schedule fuzz replays.
+Второй: настоящий loader установленного Pi, настоящий Codex SSE parser, локальный
+mock Response и dummy JWT; сеть отключена. Проверяются native/generic lifecycle,
+usage counters, футер и hash guards. Никаких новых inference-запросов/затрат.
+Старые synthetic benchmark TPS v2 не используются как gold standard: у них был
+другой, небезопасный числитель и native rescale.
 
-The four validated synthetic API streams from 6 October 2026 replayed as
-57.112842 / 50.366843 and 52.869227 / 54.063208 TPS. At their saved timestamps,
-the calculations match the standalone benchmark within 1e-9 TPS.
+Payload — `patches/pi-live-throughput/*.ts`. Патчи принимают только известные
+upstream/v2/v3 хэши и предварительно проверяют все файлы; неизвестные правки не
+перезаписываются. После установки в уже открытой Pi нужен `/reload` (для удаления
+старых провайдеров и секретов из окружения надёжнее полностью перезапустить Pi).
 
-After installation, run `/reload` in already-open Pi sessions.
+Команды: `/throughput on|off|status|widget|reset`; default — включённый status.
+Reset очищает только TPS, не журнал расходов. Отдельные настройки запроса,
+содержимое сообщения, модель и учётные данные измерительное расширение не меняет.

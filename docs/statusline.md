@@ -1,15 +1,25 @@
-# Статус-строка: как в Claude Code, но для DeepSeek
+# Статус-строка Pi / Codex (7 октября 2026)
 
-Задача: внизу pi должна быть **та же** строка, что рисует Claude Code — и тот же скрипт, без второй параллельной
-строки от расширений. Позже добавились требования: без недельной квоты Codex (pi живёт на DeepSeek), с **реальным**
-уровнем мышления вместо дефолта из настроек CC, с размером контекста в виде `1M`, а не `1000k`, и с именем текущей сессии после `·`.
+Один нижний футер, маленькие `·`, одинаковый серый цвет:
 
-## Как устроено
+```text
+📁 harness-space · GPT-6.1 Sol 272k high 221k · pi-patches · ~47.4 TPS hit 90.9% in 28.00M out 229k
+```
 
-- **`pi-statusline`** (0.0.2) — запускает внешнюю команду с CC-совместимым JSON на stdin
-  (`model.display_name`, `workspace.current_dir`, `context_window.current_usage`, `pi.session_file`…) и печатает stdout в футере.
-- **Тот же скрипт, что у Claude Code** — `~/.local/share/claude-codex-statusline/statusline.py` (`assets/statusline.py` в этой репе),
-  с флагом `--no-quota`.
+Пример формата. Первые токены — текущий контекст, `in/out` — записанный расход
+всей сессии. Скорость — guarded estimate, не server decode. Исследование причин
+spikes и ограничений: [codex-throughput.md](codex-throughput.md).
+
+## Компоненты
+
+- `pi-statusline@0.0.2` запускает внешнюю команду с CC-совместимым JSON на stdin.
+- `assets/statusline.py` → `~/.local/share/claude-codex-statusline/statusline.py`:
+  папка, модель, окно контекста, реальный thinking, occupancy, имя сессии.
+- `pi-live-throughput@0.3.0` + overlay v3 добавляет `~TPS hit … in … out …`
+  через `FooterDataProvider.getExtensionStatuses()` без нового запуска Python
+  на каждый output delta. Если поле не помещается — переносится, а не исчезает.
+- `better-claude-code-ui` не ставит второй футер: это выключено патчем
+  `fix-better-cc-ui-light-legibility.mjs`.
 
 ```json
 "statusLine": {
@@ -20,54 +30,34 @@
 }
 ```
 
-## Что дописано в скрипте
+## Источники полей и независимость Claude Code
 
-| Что | Почему |
+| Поле / решение | Реализация |
 |---|---|
-| `--no-quota` — не рисовать `● 7d N% …` и не поднимать фоновый `codex`-refresh | в pi квота Codex не нужна; без флага поведение прежнее (Claude Code) |
-| Уровень мышления из `pi.session_file`: последняя запись `thinking_level_change` | в CC-нагрузке поля `effort.level` нет, и строка показывала `effortLevel` из `~/.claude/settings.json` — «medium» вместо реального `max` |
-| Чтение головы (64 КБ) **и** хвоста (256 КБ) файла сессии | запись уровня есть и при старте сессии (в начале файла), и на каждое переключение (в хвосте) |
-| Дефолт `defaultThinkingLevel` из `~/.pi/agent/settings.json` | свежая сессия (файла ещё нет) иначе падала в CC-настройки и показывала `medium` |
-| `format_size`: ≥ 1 000 000 → `1M` | было `1000k` |
-| Имя из последней записи `session_info` в `pi.session_file` | суффикс `· имя` есть только у pi; поиск по JSONL с конца через `mmap` находит имя даже далеко от хвоста; пустое имя убирает суффикс |
+| Реальный thinking | последняя `thinking_level_change` в `pi.session_file`; head 64 KB + tail 256 KB |
+| Свежая сессия без файла | `defaultThinkingLevel` из Pi settings, затем payload/CC fallback |
+| Размер контекста | `format_size`: ≥1M отображается в M, не тысячах k |
+| Имя после `·` | последняя `session_info`, mmap-поиск с конца; очищенное имя исчезает |
+| Разделители | payload Pi → `·`; CC → прежние `●`; UI нормализует legacy Pi bullets |
+| `--no-quota` | скрывает квоту и отключает background `codex app-server` refresh; не меняет Codex auth |
+| Claude Code | прежний renderer/quota/разделители; имени сессии Pi нет |
 
-Строка в pi с именованной сессией: `📁 harness-space ● GPT-6 Sol 272k xhigh 221k · pi-patches`. В Claude Code суффикса нет.
+`fix-pi-statusline-refresh.mjs` подписывает refresh на `thinking_level_select`
+(`Shift+Tab`) и `session_info_changed` (`/name`). `fix-pi-statusline-throughput.mjs`
+прикладывает source UI overlay к нижнему футеру. Оба идемпотентны и применяются
+установщиком/обновлением; неизвестный UI hash не перезаписывается.
 
-## Патч pi-statusline
+## Офлайн-проверка
 
-`patches/fix-pi-statusline-refresh.mjs` — расширение перерисовывало футер на `session_start` / `turn_end` /
-`model_select` / `session_compact|tree|switch|fork`, но **не** на `thinking_level_select`, который pi шлёт при `shift+tab`.
-Из-за этого уровень в строке обновлялся только к концу следующего хода. Патч добавляет подписку с тем же дебаунсом. Также добавлена подписка на `session_info_changed`: `/name` сразу обновляет имя в футере (для уже запущенного pi нужна перезагрузка расширений `/reload`).
+```bash
+python3 tests/statusline-session-name.py
+node tests/codex-throughput-extension.mjs
+```
 
-## Футер один
+Проверяются имя далеко за head/tail, переименование, очистка, отсутствующий файл,
+ограничение длины и неизменность CC. Integration-тест загружает настоящий Pi UI,
+проверяет middle dots, серый цвет, dynamic throughput и widths 1–220, без сети
+и новых inference requests. При панели уже одного слова возможно усечение слова.
 
-`better-claude-code-ui` тоже регистрирует футер (своя строка `model · cwd · ctx % · стоимость · время · turns`).
-В pi футер один, поэтому патч `patches/fix-better-cc-ui-light-legibility.mjs` закомментировал `registerStatusLine(pi)`
-в его `index.ts` — иначе строки рисовались по очереди и победитель зависел от порядка `requestRender()`.
-
-## Проверка
-
-Три тестовых payload'а (без pi, свежая сессия pi, сессия с уровнем) и живой pty-прогон:
-
-| Проверка | Результат |
-|---|---|
-| payload CC (`--no-quota` не задан) | `📁 billy ● gpt-6-astra 272k medium 33k ● 7d 61% 6d 1h` — прежнее поведение |
-| payload pi, свежая сессия | `📁 billy ● DeepSeek V4.1 Flash 1M max 0k` |
-| payload pi + сессия с `thinkingLevel: low` | `… 1M low 1k` |
-| pty, до `shift+tab` | `📁 billy ● DeepSeek V4.1 Flash 1M max 363k` |
-| pty, после `shift+tab` | `📁 billy ● DeepSeek V4.1 Flash 1M off 363k` |
-
-Последние две строки — сквозная проверка: уровень меняется хоткеем, скрипт читает его из файла сессии, патч заставляет
-футер перерисоваться сразу.
-
-## Что не мешает
-
-- `pi-live-throughput` по умолчанию пишет четыре коротких поля через `setStatus`.
-  Патч `fix-pi-statusline-throughput.mjs` добавляет их в этот же нижний футер через `●`,
-  обновляет из FooterDataProvider при рендере и переносит поля в узких панелях.
-  Общий `session input` восстанавливается по usage всей сессии; текущие `18k` в базовой
-  строке остаются размером текущего контекста. См. [codex-throughput.md](codex-throughput.md).
-- Квота Codex из pi не запрашивается вовсе (флаг `--no-quota` отключает и фоновый `codex app-server` RPC).
-- Оба патча идемпотентны и применяются `install.sh`; после `pi update` — заново
-  (`node ~/.pi/agent/patches/fix-pi-statusline-refresh.mjs`).
-- Регрессия для именованной, переименованной и сброшенной сессии: `python3 tests/statusline-session-name.py` (входит в `update.sh`).
+После установки нужен `/reload`; после удаления старого провайдера/ключа лучше
+полностью перезапустить Pi, чтобы выгрузить старое расширение и старое окружение.

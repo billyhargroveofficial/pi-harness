@@ -1,10 +1,10 @@
 ---
 name: Plan
-description: Исследует задачу и составляет план реализации с проверками; может искать актуальную документацию через DeepSeek. Не изменяет файлы.
-model: deepseek/deepseek-flash
+description: Исследует задачу и составляет план реализации с проверками; может искать актуальную документацию через hosted web_search Codex. Не изменяет файлы.
+model: openai-codex/gpt-6.1-sol
 thinking: high
-tools: "read, bash, grep, find, ls, ext:pi-deepseek-search/web_search"
-extensions: [pi-deepseek-search]
+tools: "read, bash, grep, find, ls"
+extensions: [pi-openai-toolkit]
 isolated: false
 prompt_mode: replace
 ---

@@ -25,7 +25,7 @@ Verified: live weekly RPC (45% used), weekly-versus-five-hour/Spark filtering, c
   "command": "/usr/bin/python3 /Users/billy/.local/share/claude-codex-statusline/statusline.py --no-quota" }
 ```
 
-- `--no-quota` — не рисовать недельную квоту Codex и не поднимать фоновый refresh (pi живёт на DeepSeek, квота Codex там не нужна). Без флага поведение прежнее, для Claude Code.
+- `--no-quota` — не рисовать недельную квоту Codex и не поднимать фоновый refresh (компактный Pi-футер без квоты; авторизация Codex от этого не меняется). Без флага поведение прежнее, для Claude Code.
 - **Уровень мышления** берётся из сессии pi: `pi.session_file` → последняя запись `thinking_level_change` (`thinkingLevel`). Для свежей сессии дефолт из `~/.pi/agent/settings.json` (`defaultThinkingLevel`). Только если ничего из этого нет — падает в `effort.level` нагрузки и настройки Claude Code.
   Записи уровня лежат и в начале файла сессии (старт), и в хвосте (переключения), поэтому читаются и голова (64 КБ), и хвост (256 КБ).
 - **Размер контекста** печатается как `1M` при ≥ 1 000 000 (было `1000k`).
@@ -33,4 +33,6 @@ Verified: live weekly RPC (45% used), weekly-versus-five-hour/Spark filtering, c
 - Живое обновление после `shift+tab` и `/name` обеспечивает патч `patches/fix-pi-statusline-refresh.mjs`
   (события `thinking_level_select` и `session_info_changed`). Для уже открытого pi после установки патча нужен `/reload`.
 
-Пример строки в pi: `📁 harness-space ● GPT-6 Sol 272k xhigh 221k · pi-patches`
+Все разделители Pi — маленькие `·`; Claude Code сохраняет `●`.
+Пример строки в pi: `📁 harness-space · GPT-6 Sol 272k xhigh 221k · pi-patches · ~47.4 TPS hit 90.9% in 28.00M out 229k`.
+TPS и session in/out добавляет throughput overlay, не этот Python-скрипт.

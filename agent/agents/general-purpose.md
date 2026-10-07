@@ -1,10 +1,10 @@
 ---
 name: general-purpose
-description: "Выполняет отдельную задачу: исследование, реализация или проверка; доступны инструменты файлов и вебпоиск DeepSeek."
-model: deepseek/deepseek-flash
+description: "Выполняет отдельную задачу: исследование, реализация или проверка; доступны инструменты файлов и hosted вебпоиск Codex."
+model: openai-codex/gpt-6.1-sol
 thinking: high
-tools: "*, ext:pi-deepseek-search/web_search"
-extensions: [pi-deepseek-search]
+tools: "*"
+extensions: [pi-openai-toolkit]
 isolated: false
 prompt_mode: append
 ---

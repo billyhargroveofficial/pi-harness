@@ -15,44 +15,34 @@ timeout 30 script -q /dev/null pi --tui-mode regular --session \
 
 Так получены цифры из [`compact-output.md`](compact-output.md) и проверка скрытия thinking (5 блоков → 5 строк `Thought for`, 0 утечек).
 
-## 2. Синтетический прогон расширения
-
-`pi-live-throughput` проверяется без модели: модуль расширения импортируется как есть и управляется фиктивным API pi — собираются обработчики `on(...)`, подменяется `ctx.ui`, затем посылаются синтетические события `session_start` → `before_provider_request` → `message_start` → серия `message_update` → `message_end`.
-
-Нюанс: Node отказывается стрипать типы для файлов внутри `node_modules` (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`), поэтому копия файла кладётся в `/tmp` и импортируется оттуда:
+## 2. Офлайн-прогон throughput v3 (7 октября 2026)
 
 ```bash
-cp ~/.pi/agent/npm/node_modules/pi-live-throughput/src/index.ts /tmp/live-throughput-test.ts
-node --experimental-strip-types /tmp/tps-check.mjs
+node tests/codex-throughput.mjs
+node tests/codex-throughput-extension.mjs
 ```
 
-Полученный рендер (реальный вывод расширения, не ожидания):
+Проверяются adversarial native события и 1200 детерминированных schedule fuzz
+replays. Integration-тест использует настоящий loader Pi и настоящий SSE parser
+Codex, mock Response и dummy JWT; сеть отключена. На fixture с четырьмя deltas
+по 40 UTF-16 units за 1.5 s выводит `~20.0 TPS` (первый chunk исключён),
+даже если native output = 100000. Проверенный результат:
+`~20.0 TPS hit 90.0% in 1.0k out 100k`. Переход на новый запрос очищает TPS,
+reset не удаляет usage, ошибочный/короткий/burst поток даёт `-`.
 
-```
-⚡ 206 tok/s · avg 206 tok/s · 100 tok · 0.5s · deepseek-flash
-✓ 512 tok in 0.7s · 702 tok/s avg · peak 247 tok/s · input 1.2k tok · cache read 8.0k tok · TTFT 703ms · approx. prompt 1707 tok/s · deepseek-flash
-/throughput status → ✓ 512 tok · 702 tok/s · input 1.2k tok · cache read 8.0k tok · TTFT 703ms · approx. prompt 1707 tok/s
-/throughput off    → виджет и статус очищены
-```
-
-TTFT = 703 ms при вставленной в тест паузе 700 ms — значит отсчёт идёт от границы запроса к провайдеру до первого содержательного события, как заявлено.
+Исследование измерительных ограничений и источники: [codex-throughput.md](codex-throughput.md).
+Старые скорости widget/native-rescaled версии не используются как эталон v3.
 
 ## 3. Проверка загрузки
+
+Тесты загружают реальный модуль через Pi loader и требуют `loaded.errors = []`.
+Дополнительный интерактивный smoke boot без запроса к модели:
 
 ```bash
 timeout 20 script -q /dev/null pi --tui-mode regular --no-session < /dev/null > /tmp/boot.raw 2>&1
 ```
 
-В шапке ресурсов видно, что именно подхватилось:
-
-```
-[Extensions]  @tintinweb/pi-subagents@0.19.0:src, pi-claude-code-ui,
-              pi-claude-code-ui:spinner.ts, pi-deepseek-search@1.0.20,
-              pi-live-throughput:src
-[Themes]      billy-aurora, claude-green
-```
-
-Плюс проверка на ошибки в кадре (`error|failed|cannot`) — пусто.
+Ресурсы и ошибки проверяются в фактическом capture, не по ожидаемому баннеру.
 
 ## 4. Валидация темы
 
@@ -134,50 +124,24 @@ dark:  #999999 → #c9c9c9   худший контраст за цикл = 5.85:
 
 Скрипт-анализатор — тот же принцип, что в п. 6, но с полным сбросом: без обработки `\e[0m` цвет предыдущего сегмента (например, цвет вертикальной линейки диффа) ошибочно приписывается следующему тексту и даёт ложные 1.1:1.
 
-## 10. Статус-строка и удаление Codex из pi (историческая проверка)
-
-Этот раздел фиксирует прежнюю конфигурацию сентября 2026. В снимке 4 октября 2026
-Codex снова включён; актуальные модели и настройки — в `agent/settings.json`.
-
-**Скрипт статус-строки** проверяется тремя payload'ами напрямую (быстрее и точнее, чем ждать живого ответа):
+## 10. Статус-строка и Codex-only конфигурация
 
 ```bash
-# CC (без флагов) — должно остаться прежним, с квотой
-echo '{"model":{"display_name":"gpt-6-astra"},"workspace":{"current_dir":"/Users/billy"},
-       "context_window":{"context_window_size":272000,"used_percentage":12}}' \
-  | /usr/bin/python3 ~/.local/share/claude-codex-statusline/statusline.py
-
-# pi: свежая сессия (session_file=null) → дефолт из ~/.pi/agent/settings.json
-echo '{"model":{"id":"deepseek-flash","display_name":"DeepSeek V4.1 Flash"},
-       "workspace":{"current_dir":"/Users/billy"},
-       "context_window":{"context_window_size":1000000,"used_percentage":0}}' \
-  | /usr/bin/python3 ~/.local/share/claude-codex-statusline/statusline.py --no-quota
-
-# pi: реальная сессия → уровень из последней записи thinking_level_change
-echo '{...,"pi":{"session_file":"/tmp/copy.jsonl"}}' \
-  | /usr/bin/python3 ~/.local/share/claude-codex-statusline/statusline.py --no-quota
+python3 tests/statusline-session-name.py
+python3 tests/portable-config.py
+python3 tests/codex-only.py
 ```
 
-Ожидание: `272k medium … ● 7d …` (CC) / `1M max 0k` (свежая) / `1M off …` (после правки уровня в хвосте сессии).
+Statusline tests используют именованную, переименованную, очищенную и свежую
+сессии; проверяют маленькие `·` только в Pi и прежние `●` в CC. Refresh hooks
+проверяются для thinking и имени. Integration throughput проверяет Unicode/ANSI
+widths 1–220 и динамический футер без повторного запуска Python.
 
-**Сквозная проверка хоткея.** В pty открывается копия сессии, снимается строка до и после `shift+tab` (`\x1b[Z`):
-
-```
-до  shift+tab: 📁 billy ● DeepSeek V4.1 Flash 1M max 363k
-после shift+tab: 📁 billy ● DeepSeek V4.1 Flash 1M off 363k
-```
-
-Это одновременно доказывает три вещи: `shift+tab` меняет уровень в сессии, скрипт читает его оттуда,
-а патч `fix-pi-statusline-refresh.mjs` заставляет футер перерисоваться сразу.
-
-**Удаление Codex** проверяется тремя независимыми точками, а не одной:
-
-| Что | Как проверено |
-|---|---|
-| модели | `enabledModels` = только `deepseek/deepseek-flash`; после pty-запуска `models-store.json` содержит один провайдер `deepseek` (pi пересобрал кэш каталога) |
-| учётки | в `auth.json` остался только `xai-auth` (был ещё `openai-codex`) |
-| поиск | `~/.pi/agent/extensions/codex-web-search.ts` удалён; при загрузке pi ошибок нет (`error|failed|cannot|invalid` в кадре — пусто) |
-| селектор моделей | в кадре `ctrl+l` нет ни `codex`, ни `gpt-` |
+Migration-тест на fake HOME проверяет удаление retired provider/search/отдельного
+ключа, sanitization конфигурационных бэкапов, сохранение OAuth, приватных прав,
+машинной темы, пользовательской Codex-модели и symlink общих инструкций.
+Ошибочный JSON останавливает миграцию до записи других файлов. Офлайн-проверки
+не утверждают успешный реальный HTTP inference или работоспособность чужого OAuth.
 
 ## 11. Компактные тулколы и неподвижный текст при мигании
 

@@ -4,6 +4,10 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_DIR="${PI_CODING_AGENT_DIR:-${PI_AGENT_DIR:-$HOME/.pi/agent}}"
 export PI_CODING_AGENT_DIR="$AGENT_DIR"
+unset DEEPSEEK_API_KEY
+
+# Retire obsolete provider configs before reconciling packages; retain machine UI/auth.
+python3 "$REPO_DIR/assets/codex-only.py" --agent-dir "$AGENT_DIR" --home "$HOME" --purge-retired-secrets
 
 # Defaults to package updates only. Pass --all to update Pi itself too.
 if [ "$#" -eq 0 ]; then set -- --extensions; fi
@@ -45,6 +49,12 @@ fi
 PI_CODING_AGENT_DIR="$AGENT_DIR" node "$REPO_DIR/tests/compact-tools.mjs"
 PI_CODING_AGENT_DIR="$AGENT_DIR" node "$REPO_DIR/tests/subagents-live-tools.mjs"
 PI_CODING_AGENT_DIR="$AGENT_DIR" node "$REPO_DIR/tests/orca-math.mjs"
+SL_DIR="$HOME/.local/share/claude-codex-statusline"
+mkdir -p "$SL_DIR"
+cp "$REPO_DIR/assets/statusline.py" "$SL_DIR/statusline.py"
+chmod 700 "$SL_DIR/statusline.py"
+python3 "$REPO_DIR/tests/codex-only.py"
+python3 "$REPO_DIR/tests/portable-config.py"
 python3 "$REPO_DIR/tests/statusline-session-name.py"
 node "$REPO_DIR/tests/session-manager-hide-subagents.mjs"
 node "$REPO_DIR/tests/codex-throughput.mjs"

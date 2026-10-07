@@ -1,6 +1,5 @@
 {
   "packages": [
-    "npm:pi-deepseek-search@1.0.20",
     "npm:@tintinweb/pi-subagents",
     {
       "source": "npm:pi-claude-code-ui",
@@ -44,7 +43,6 @@
     }
   },
   "enabledModels": [
-    "deepseek/deepseek-flash",
     "openai-codex/gpt-6.1-sol",
     "openai-codex/gpt-6-astra",
     "openai-codex/gpt-6-sol"

@@ -1,10 +1,10 @@
 ---
 name: web-researcher
-description: Ищет актуальную информацию нативным вебпоиском DeepSeek, проверяет утверждения и возвращает прямые ссылки на источники.
-model: deepseek/deepseek-flash
+description: Ищет актуальную информацию hosted вебпоиском Codex, проверяет утверждения и возвращает прямые ссылки на источники.
+model: openai-codex/gpt-6.1-sol
 thinking: high
-tools: "read, grep, find, ls, ext:pi-deepseek-search/web_search"
-extensions: [pi-deepseek-search]
+tools: "read, grep, find, ls"
+extensions: [pi-openai-toolkit]
 isolated: false
 prompt_mode: replace
 ---

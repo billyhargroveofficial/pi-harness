@@ -264,7 +264,8 @@ def render(data, quota, now=None, show_quota=True):
         countdown = f'{days}d {hours}h' if days else (f'{hours}h {minutes}m' if hours else f'{minutes}m')
         quota_part = f'7d {used:g}% {countdown}' + (' ~' if stale else '')
     parts = [f'📁 {folder}', model_part] + ([quota_part] if quota_part else [])
-    return '\033[38;5;8m' + clean(' ● '.join(parts)) + '\033[0m'
+    separator = ' · ' if pi_payload else ' ● '
+    return '\033[38;5;8m' + clean(separator.join(parts)) + '\033[0m'
 
 
 def main():

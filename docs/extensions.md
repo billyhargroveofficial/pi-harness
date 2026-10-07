@@ -1,8 +1,8 @@
 # Расширения: что стоит, зачем и с какими настройками
 
-**Актуальный набор (6 октября 2026):** `better-claude-code-ui@0.1.9` (рендер тулов в стиле CC, из него же тема), `@fadouse/pi-math@0.2.0` (MathJax-картинки),
+**Актуальный набор (7 октября 2026):** `better-claude-code-ui@0.1.9` (рендер тулов в стиле CC, из него же тема), `@fadouse/pi-math@0.2.0` (MathJax-картинки),
 `pi-statusline` (статус-строка = тот же скрипт, что в Claude Code — см. [`statusline.md`](statusline.md)),
-`@tintinweb/pi-subagents`, `pi-deepseek-search`, `pi-live-throughput`, `pi-mcp-adapter`, `pi-openai-toolkit`,
+`@tintinweb/pi-subagents`, `pi-live-throughput`, `pi-mcp-adapter`, `pi-openai-toolkit`,
 `@vanillagreen/pi-session-manager@2.0.4` и локальный `zzzz-compact-tools.ts`. Разделы ниже — по пакетам;
 `pi-claude-code-ui` оставлен установленным, но **отключён** (`"extensions": []`), его место занял форк.
 
@@ -132,18 +132,15 @@ node ~/.pi/agent/patches/fix-cc-tools-light-chrome.mjs
 
 Что захардкожено и настройками не меняется: рамка вокруг юзер-сообщения (`roundedUserBorder`), коннекторы `├ └ │` (меняется только цвет), форма строк.
 
-## pi-live-throughput (0.2.0)
+## pi-live-throughput (0.3.0 + overlay v3)
 
-Одна строка с метриками генерации. Живые значения берёт из `usage.output` провайдера, если тот отдаёт накопленный счёт во время стрима; иначе помечает оценку как `est.` / `~`.
+Компактный нижний футер: `· ~47.4 TPS hit 90.9% in 28.00M out 229k`.
+Скорость — guarded client-delivery estimate; native billing usage не масштабирует
+окно. Short/burst/invalid output даёт `-`; reasoning summaries и done snapshots
+не timed tokens. Все разделители Pi — маленькие `·`. Исследование измерения,
+пороговые политики и остаточные ограничения: [codex-throughput.md](codex-throughput.md).
 
-```
-⚡ 92.3 tok/s · avg 84.5 tok/s · 1.2k tok · 14.2s · deepseek-flash
-✓ 512 tok in 2.0s · 256 tok/s avg · peak 319 tok/s · input 1.2k tok · cache read 8.0k tok · TTFT 420ms · approx. prompt 2900 tok/s
-```
-
-TTFT — от `before_provider_request` до первого содержательного события (текст/thinking/tool-call). Это end-to-end наблюдение: включает сеть, очередь, кеш, а не только prefill.
-
-Режимы (по умолчанию `widget` — строка над редактором; `/throughput status` — компактная строка в футере):
+Режимы (по умолчанию `status`, строка в нижнем футере):
 
 | Команда | Действие |
 |---|---|
@@ -152,7 +149,8 @@ TTFT — от `before_provider_request` до первого содержател
 | `/throughput widget` | строка над редактором |
 | `/throughput reset` | сбросить измерение/итог |
 
-Состояние режима живёт только в памяти сессии (`let mode = "widget"`), в файлы не пишется — после рестарта снова `widget`, включено.
+Режим живёт в памяти — после рестарта снова `status`, включено. Reset очищает
+только TPS, не session usage. `in/out` восстанавливаются из всех recorded usage entries.
 
 ## @tintinweb/pi-subagents (0.19.0)
 
@@ -176,7 +174,8 @@ TTFT — от `before_provider_request` до первого содержател
 }
 ```
 
-Пользовательские типы — `agent/agents/*.md` (frontmatter: `model`, `thinking`, `tools`, `extensions`, `prompt_mode`). Все четыре ходят через `deepseek/deepseek-flash` и имеют `web_search`. Важно: не ставить `isolated: true` там, где нужен веб-поиск — этот режим отключает расширения.
+Пользовательские типы — `agent/agents/*.md` (frontmatter: `model`, `thinking`, `tools`, `extensions`, `prompt_mode`). Все четыре ходят через `openai-codex/gpt-6.1-sol`; `extensions: [pi-openai-toolkit]`
+включает hosted `web_search` (это server-side tool, не локальный `ext:…/web_search`). Важно: не ставить `isolated: true` там, где нужен веб-поиск — этот режим отключает расширения.
 
 ### Патч к пакету
 
@@ -185,10 +184,6 @@ TTFT — от `before_provider_request` до первого содержател
 ```bash
 node ~/.pi/agent/patches/fix-subagents-typebox-peers.mjs
 ```
-
-## pi-deepseek-search (1.0.20)
-
-Нативный поиск DeepSeek как инструмент `web_search`: свежие данные + прямые ссылки на источники.
 
 ## Формулы: pi-math с активным better-claude-code-ui
 
@@ -216,11 +211,9 @@ Orca при построчной перерисовке Pi стирает мно
 Настройки, чтобы выключить конвертер у старого cc-ui, нет; про pi-math он не знает. Поэтому раньше pi-math снимали, а рендерер тулов впоследствии заменили на `better-claude-code-ui` — он не трогает формулы.
 
 
-## Codex TPS (6 октября 2026)
+## Codex TPS (7 октября 2026)
 
-`pi-live-throughput` получает native события Codex до преобразования Pi.
-Нижний статусбар содержит четыре коротких поля через `●`: `momentum`,
-`cumulative`, `cache hit` и общий `session input`. Hidden reasoning вычитается,
-последняя текущая скорость сохраняется между deltas, live-оценка помечена `~`.
-Usage всей сессии включает cache и не обнуляется при компактизации или `/reload`.
-Подробности и проверки: [codex-throughput.md](codex-throughput.md).
+`pi-live-throughput` получает native события Codex до преобразования Pi, сверяет
+IDs, seq, raw/SDK hashes, но не выдаёт native billing counts за timed output.
+`in/out` включают записанный расход всей сессии и не обнуляются при компактизации
+или `/reload`. Подробности и adversarial проверки: [codex-throughput.md](codex-throughput.md).

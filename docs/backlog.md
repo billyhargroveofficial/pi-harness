@@ -9,14 +9,14 @@
 - [ ] **Светлая пара для `billy-aurora`.** В авто-режиме (`claude-code-light-hc/claude-code-dark`) он не участвует и остаётся тёмным. Нужен ли вообще — решать при следующем обращении к этой теме.
 - [ ] **Сообщить апстриму баги светлой темы.** `pi-claude-code-ui`: осветление chrome на светлых панелях, порча truecolor в `stripBackgroundAnsi` (репа `pi-cc-tools`). `better-claude-code-ui` (`Demo-0416/my-pi-extensions`): светлый diff-chrome захардкожен (номера строк 1.9:1, текст строк 2.4–2.9:1), глоу-рампа спиннера захардкожена серыми 153→185 (1.8:1 на белом) и не подстраивается под схему, контекстные строки диффа под `DIM` вместо приглушённого цвета (1.35:1), два расширения могут драться за один футер (`setFooter` не отключается настройкой). До фиксов живёт наш `patches/`.
 - [ ] **Проверить дублирование инструкций** между `~/.pi/agent/AGENTS.md` и `~/.agents/AGENTS.md` (второй лежит рядом со скиллами).
-- [ ] **Компакция на 1M-контексте.** Проверить, не режет ли `compaction.reserveTokens 16384` / `keepRecentTokens 20000` слишком агрессивно на длинных сессиях с `deepseek-flash`.
+- [ ] **Компакция Codex.** Проверить качество summary и keepRecentTokens на длинных реальных сессиях при пороге 245k.
 
 ## Исследования (без кода)
 
 - **Картинки-формулы без потери компактных тулов.** `pi-claude-code-ui` перехватывает LaTeX и рисует юникод-текстом, поэтому `pi-math` с ним бесполезен (снят). Проверить `@vanillagreen/pi-tool-renderer`: если он даёт компактные тул-строки и при этом не трогает markdown — получится и то и другое.
 
 - Сравнить `pi-live-throughput` с `pi-tokometer` и `@pi-plugins/speed` по точности TTFT и avg TPS на reasoning-модели (`thinking max`) — текущие замеры сделаны на синтетических событиях, а не на живых ответах.
-- Таблица «thinking-уровень → реальный расход thinking-токенов» для `deepseek-flash` (по умолчанию включён `max`).
+- Таблица «thinking-уровень → реальный расход reasoning-токенов» для доступных Codex-моделей.
 - Проверить, не появилось ли у `pi-claude-code-ui` настроек для формы тул-строк в новых версиях (в 1.0.83 их нет).
 
 ## Мёртвые настройки (не тратить время)
@@ -25,8 +25,7 @@
 
 ## Сделано
 
-- **pi — только DeepSeek.** Удалены Codex-провайдер и его модели (`enabledModels`, `models-store.json`, `auth.json`),
-  расширение `codex-web-search.ts`; статус-строка больше не запрашивает квоту Codex (`--no-quota`).
+- **Pi — только Codex.** Стандартные агенты используют Sol 6.1, поиск — hosted через OpenAI toolkit. Миграция удаляет старые provider/search-конфиги и отдельный env-ключ, сохраняя машинные темы/OAuth.
 - **Статус-строка.** `pi-statusline` + тот же скрипт, что у Claude Code: реальный уровень мышления из сессии pi
   (а не `effortLevel` из настроек CC), размер контекста `1M`, без квоты; патч `fix-pi-statusline-refresh.mjs`
   перерисовывает строку на `thinking_level_select`. [`statusline.md`](statusline.md).
@@ -35,12 +34,12 @@
   замеры до/после и способы проверки — [`verification.md`](verification.md) п. 7–9.
 - **Статус-строка как в Claude Code** — `pi-statusline` запускает тот же скрипт `statusline.py`; вторая статус-строка cc-ui отключена патчем. [`statusline.md`](statusline.md).
 - **Скиллы.** Из `agent/settings.json` убраны исключения на несуществующие пути (`~/.agents/inactive-skills/*`), остался один корень `~/.agents/skills`.
-- **`pi-live-throughput`** — остаётся в режиме `widget` (строка над редактором) намеренно: футер занят `pi-statusline`, а `setStatus`-режим (`/throughput status`) при кастомном футере не виден.
+- **`pi-live-throughput`** — compact status внутри `pi-statusline`, `~TPS hit … in … out …`, маленькие `·`, guards против burst spikes; [исследование](codex-throughput.md).
 - Авто-тема light/dark по системной теме macOS: разбор трёх причин, почему тема не переключалась (см. `light-theme.md`).
 - Патчи к `pi-claude-code-ui` (chrome на светлой панели, порча truecolor в SGR) — `patches/`, идемпотентно, применяется `install.sh`.
 - Компактный вывод тулов: свёрнутый bash — одна строка, вывод только по `Ctrl+O` (замеры в `compact-output.md`).
 - Скрытие thinking-блоков: `Thinking…` во время, `Thought for Ns` после, содержимого нет.
-- `pi-live-throughput`: TPS / avg TPS / TTFT / peak / input / cache read.
+- Предыдущий подробный throughput widget заменён compact guarded footer.
 - Выяснено, почему не рисуются формулы-картинки, и снят `@fadouse/pi-math` (−40 МБ зависимостей) — см. `extensions.md`.
 - Снят `pi-cc-extensions` (пробовался ради `/context`): его рендер-патчи конфликтуют с `pi-claude-code-ui`. Замер на живом растущем файле сессии оказался невалидным, вывод сделан по коду: `mode: "off"` не выключает патчи рендера.
 - **CC-вид: рамки и деревья.** Рамка вокруг юзер-сообщения и коннекторы `├ └ │` захардкожены в cc-ui — готового расширения/настройки не нашлось, оставлено как есть (настраивать нечем).

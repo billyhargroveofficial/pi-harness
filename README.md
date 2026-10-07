@@ -28,26 +28,26 @@
 
 Установка на новой машине: `./install.sh` (копирует с бэкапом существующих файлов).
 JSON-пути адаптируются к `$HOME`; существующие команды получения ключей в
-`models.json` сохраняются. `auth.json` и OAuth-токены не копируются.
+`models.json` сохраняются только для `openai-codex`. Старые провайдеры не восстанавливаются.
+`auth.json` и OAuth-токены не копируются.
 Конфиг `agent/extensions/pi-openai-toolkit/config.json` включает hosted web search
 для Codex. Установщик поднимает старые npm-пакеты до проверенного минимума из
 `assets/tested-package-versions.json`, не понижая более новые версии. На Linux нужны Python 3, Node.js/npm, git и `pi` в PATH (у брата `~/.npm-global/bin`); приложения и туннели Mac не переносятся. Каталог навыков `~/.agents/skills`, MCP-конфиги и учётные данные остаются машинными; Orca-managed расширения создаёт сам Orca. Временные диагностические probe-расширения не входят в репозиторий.
 
 ## Стек
 
-Снимок конфигурации репозитория: **6 октября 2026** (не заявление о последних версиях npm).
+Снимок конфигурации репозитория: **7 октября 2026** (не заявление о последних версиях npm).
 
 - **pi** 1.0.4
 - **провайдер/модель по умолчанию**: `openai-codex/gpt-6.1-sol`, thinking `high`
-- **другие доступные модели**: `deepseek/deepseek-flash`, `openai-codex/gpt-6-sol`, `openai-codex/gpt-6-astra` (medium); неиспользуемый RunPod-туннель убран из канонической конфигурации
-- **thinking**: у DeepSeek уровни `medium`/`xhigh` скрыты (`thinkingLevelMap`)
+- **только Codex**: также доступны `openai-codex/gpt-6-sol` (xhigh), `openai-codex/gpt-6-astra` (medium). Все четыре стандартных субагента используют Codex Sol 6.1; поиск — hosted `web_search` через OpenAI toolkit. В `models.json` нет сторонних провайдеров.
 - **compaction**: для доступных GPT-моделей с окном 272k `reserveTokens: 27000` → порог авто-компактизации при превышении 245k; для остальных моделей `reserveTokens: 1000`. `keepRecentTokens: 500` остаётся общим
 - **thinking-блоки скрыты**: видно `Thinking…` во время и `Thought for Ns` после, содержимое не рендерится (`hideThinkingBlock: true`)
 - **тема**: авто по системной теме macOS — светлая `claude-code-light-hc` / тёмная `claude-code-dark` (палитра Claude Code; в светлой приглушённые токены подтянуты до ≥4.5:1). Детект — `CSI ? 996 n` + подписка на mode 2031, Ghostty это отдаёт
 - **статус-строка**: `pi-statusline` запускает тот же скрипт, что и Claude Code, с флагом `--no-quota` — папка, модель, размер контекста (`1M`), **реальный** уровень мышления, токены и `· имя сессии` (только pi); квота Codex в pi не спрашивается
 - **TUI**: fullscreen
 - **компактный вывод тулов**: одна строка без stdout, диффов, картинок и стриминг-превью; `Ctrl+O` раскрывает обычный рендер, `/compact-tools off` возвращает старый вид. Мигающая точка сохраняет своё место — текст не дёргается. Дополнительной группировки одинаковых вызовов нет; после сообщений пользователя и ассистента добавляется пустая строка
-- **метрики**: `momentum` (текущий TPS), `cumulative` (накопленная по модели), `cache hit` и общий `session input` в нижнем статусбаре через `pi-live-throughput` с Codex-патчем: hidden reasoning вычитается, скорость сохраняется между deltas
+- **метрики**: `· ~47.4 TPS hit 90.9% in 28.00M out 229k` в нижнем статусбаре. Все разделители Pi — маленькие `·`. TPS — guarded оценка доставки UTF-16/4, не server decode; короткие/coalesced/непроверенные потоки дают `-`, native usage не масштабирует скорость. `in/out` — записанный расход всей сессии; output включает reasoning. Подробности и пределы — в исследовании ниже.
 - **сессии**: `/sessions` от `@vanillagreen/pi-session-manager` открывает Current/All (`Tab`) и скрывает сохранённые сессии субагентов, оставляя обычные форки/ветки. Патч `fix-pi-session-manager-hide-subagents` не меняет штатный `/resume`, файлы сессий и возобновление субагентов по `@handle`.
 - **формулы**: `@fadouse/pi-math@0.2.0` рисует MathJax-картинки через Kitty внутри Orca; локальное расширение `orca-kitty-images.ts` передаёт Pi графические возможности Orca. Формулы слева: белые в тёмной теме и тёмные в светлой, цвет меняется вместе с темой. Дисплейные формулы в Orca ужимаются в одну строку, иначе построчная перерисовка стирает картинки. Старый `pi-claude-code-ui` с Unicode-конвертером отключён; активен совместимый `better-claude-code-ui`.
 
@@ -61,8 +61,7 @@ JSON-пути адаптируются к `$HOME`; существующие ко
 | `pi-statusline` | 0.0.2 | Статус-строка внешней командой (CC-совместимый JSON на stdin) — внизу та же строка, что в Claude Code; патч `fix-pi-statusline-refresh` |
 | `pi-mcp-adapter` | 5.1.0 | MCP-серверы в pi (notion, telegram) |
 | `@tintinweb/pi-subagents` | 0.19.0 проверена; npm без version pin | Субагенты и workflow-оркестрация; патчи `fix-subagents-typebox-peers` и `fix-subagents-live-tools` (live Activity) |
-| `pi-deepseek-search` | 1.0.20 | Нативный веб-поиск DeepSeek как инструмент |
-| `pi-live-throughput` | 0.3.0 | Нижний футер: `momentum`, `cumulative`, cache hit %, session input; native TPS без hidden reasoning, последнее текущее значение сохраняется |
+| `pi-live-throughput` | 0.3.0 + overlay v3 | Нижний футер: guarded `~TPS`, hit %, session in/out; без cumulative/native rescale, fail-closed burst policy |
 | `pi-openai-toolkit` | 0.20.8 | Инструменты интеграции OpenAI, добавлен в текущие настройки |
 | `@vanillagreen/pi-session-manager` | 2.0.4 | Менеджер `/sessions`: поиск, Current/All, возобновление, переименование и удаление; патч скрывает субагентов только в этом списке |
 | `@fadouse/pi-math` | 0.2.0 | Настоящие LaTeX-картинки внутри Orca (MathJax → Kitty); патчи для однострочного отображения в Orca и зависимости xmldom |
@@ -73,7 +72,7 @@ JSON-пути адаптируются к `$HOME`; существующие ко
 
 Подробности по каждому решению — в `docs/`:
 
-- [`docs/codex-throughput.md`](docs/codex-throughput.md) — расчёт Codex TPS, hidden reasoning, нижний футер, cache hit %, session input, offline replay
+- [`docs/codex-throughput.md`](docs/codex-throughput.md) — исследование причин ложного TPS, guards/неустранимые пределы, компактный футер и session in/out, adversarial offline replay
 - [`docs/extensions.md`](docs/extensions.md) — что за расширения, какие у них настройки и что у них мертво
 - [`docs/statusline.md`](docs/statusline.md) — статус-строка: `pi-statusline` + тот же скрипт (без квоты Codex, реальный уровень мышления)
 - [`docs/light-theme.md`](docs/light-theme.md) — авто light/dark, светлая тема и патчи к cc-ui (две итерации)
@@ -83,6 +82,22 @@ JSON-пути адаптируются к `$HOME`; существующие ко
 - [`docs/backlog.md`](docs/backlog.md) — что ещё хочется доделать, сюда же складываются идеи
 
 ## Как обновлять
+
+Только новые Codex-only/TPS/statusline настройки, **без npm-обновлений и замены
+машинной темы, MCP, навыков или пользовательских Codex-defaults**:
+
+```bash
+./assets/deploy-codex-status.sh
+# У брата: export PATH="$HOME/.npm-global/bin:$PATH"; git pull --ff-only;
+# затем ./assets/deploy-codex-status.sh из ~/repos/pi-harness
+```
+
+Скрипт проверяет известный hash общего Python-рендерера, применяет guarded overlays
+и тестирует именно установленный код. Старые открытые Pi/терминалы/Orca следует
+перезапустить: удалённый env-файл не стирает ключ из окружения уже живого процесса.
+История чатов и Git не переписываются.
+
+Полное upstream-обновление:
 
 ```bash
 ./update.sh                     # npm-пакеты + патчи + офлайн-регрессии
@@ -94,7 +109,7 @@ cp ~/.pi/settings.json          ext/settings.json
 cp ~/.pi/agent/extensions/zzzz-compact-tools.ts agent/extensions/
 node tests/compact-tools.mjs
 node tests/orca-math.mjs
-# models.json не копировать вслепую: literal apiKey заменить командой из env-файла.
+# auth.json не копировать в репу; models.json канонически пуст (built-in Codex).
 git add agent ext docs tests patches README.md install.sh update.sh
 git commit -m "sync: <что поменялось>"
 ```
@@ -107,4 +122,4 @@ git commit -m "sync: <что поменялось>"
 
 ## Приватность
 
-Ключи и OAuth-токены в репу не включаются; `auth.json` не отслеживается. DeepSeek читает ключ командой из `~/.config/deepseek.env`. Неиспользуемый RunPod-провайдер исключён из канонического конфига; установщик сохраняет дополнительные машинные провайдеры и их авторизацию. Codex авторизуется через `/login`. В `.gitignore` закрыты `auth.json`, `models-store.json`, `sessions/`, `npm/`, `backups/`, `trust.json`.
+Ключи и OAuth-токены в репу не включаются; `auth.json` не отслеживается. Настройки, модельный кэш, агенты и поиск — только Codex. Миграция `assets/codex-only.py` удаляет старое поисковое расширение и его отдельный env-ключ, чистит конфигурационные бэкапы, сохраняет OAuth Codex, машинные темы и пользовательские Codex-модели. История чатов и встроенный каталог SDK не переписываются. Codex авторизуется через `/login`. В `.gitignore` закрыты `auth.json`, `models-store.json`, `sessions/`, `npm/`, `backups/`, `trust.json`.

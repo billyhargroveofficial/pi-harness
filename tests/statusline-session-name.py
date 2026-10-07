@@ -35,13 +35,14 @@ with tempfile.TemporaryDirectory() as temp:
         },
         'pi': {'session_file': str(session)},
     }
-    expected = '📁 harness-space ● GPT-6 Sol 272k xhigh 221k · pi-patches'
+    base = '📁 harness-space · GPT-6 Sol 272k xhigh 221k'
+    expected = base + ' · pi-patches'
     assert plain(statusline.render(data, {}, show_quota=False)) == expected
 
     # Claude Code shares the script but never receives the Pi-only suffix.
     claude = {key: value for key, value in data.items() if key != 'pi'}
     claude['effort'] = {'level': 'xhigh'}
-    assert plain(statusline.render(claude, {}, show_quota=False)) == expected.split(' · ')[0]
+    assert plain(statusline.render(claude, {}, show_quota=False)) == base.replace(' · ', ' ● ')
 
     with session.open('a') as f:
         f.write(line({'type': 'session_info', 'name': 'renamed'}))
@@ -49,7 +50,7 @@ with tempfile.TemporaryDirectory() as temp:
 
     with session.open('a') as f:
         f.write(line({'type': 'session_info', 'name': ''}))
-    assert plain(statusline.render(data, {}, show_quota=False)) == expected.split(' · ')[0]
+    assert plain(statusline.render(data, {}, show_quota=False)) == base
 
     long_name = 'N' * 70
     with session.open('a') as f:
@@ -58,8 +59,8 @@ with tempfile.TemporaryDirectory() as temp:
 
     data['pi']['session_file'] = str(session.with_name('missing.jsonl'))
     missing = plain(statusline.render(data, {}, show_quota=False))
-    assert missing.startswith('📁 harness-space ● GPT-6 Sol 272k ')
-    assert missing.endswith(' 221k') and ' · ' not in missing
+    assert missing.startswith('📁 harness-space · GPT-6 Sol 272k ')
+    assert missing.endswith(' 221k') and missing.count(' · ') == 1
 
 patch = (root / 'patches/fix-pi-statusline-refresh.mjs').read_text()
 assert 'pi.on("session_info_changed"' in patch, 'missing rename refresh hook'
