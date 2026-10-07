@@ -47,7 +47,7 @@ JSON-пути адаптируются к `$HOME`; существующие ко
 - **статус-строка**: `pi-statusline` запускает тот же скрипт, что и Claude Code, с флагом `--no-quota` — папка, модель, размер контекста (`1M`), **реальный** уровень мышления, токены и `· имя сессии` (только pi); квота Codex в pi не спрашивается
 - **TUI**: fullscreen
 - **компактный вывод тулов**: одна строка без stdout, диффов, картинок и стриминг-превью; `Ctrl+O` раскрывает обычный рендер, `/compact-tools off` возвращает старый вид. Мигающая точка сохраняет своё место — текст не дёргается. Дополнительной группировки одинаковых вызовов нет; после сообщений пользователя и ассистента добавляется пустая строка
-- **метрики**: `· ~47.4 TPS hit 90.9% in 28.00M out 229k` в нижнем статусбаре. Все разделители Pi — маленькие `·`. TPS — guarded оценка доставки UTF-16/4, не server decode; короткие/coalesced/непроверенные потоки дают `-`, native usage не масштабирует скорость. `in/out` — записанный расход всей сессии; output включает reasoning. Подробности и пределы — в исследовании ниже.
+- **метрики**: `· ~47.4 TPS hit 90.9% in 28.00M out 229k` в нижнем статусбаре. Все разделители Pi — маленькие `·`. TPS — guarded оценка доставки UTF-16/4, не server decode; короткие/coalesced/непроверенные потоки не обновляют последнее корректное TPS; `-` только пока его нет. Паузы и прогрев следующего ответа больше не сбрасывают число; native usage не масштабирует скорость. `in/out` — записанный расход всей сессии; output включает reasoning. Подробности и пределы — в исследовании ниже.
 - **сессии**: `/sessions` от `@vanillagreen/pi-session-manager` открывает Current/All (`Tab`) и скрывает сохранённые сессии субагентов, оставляя обычные форки/ветки. Патч `fix-pi-session-manager-hide-subagents` не меняет штатный `/resume`, файлы сессий и возобновление субагентов по `@handle`.
 - **формулы**: `@fadouse/pi-math@0.2.0` рисует MathJax-картинки через Kitty внутри Orca; локальное расширение `orca-kitty-images.ts` передаёт Pi графические возможности Orca. Формулы слева: белые в тёмной теме и тёмные в светлой, цвет меняется вместе с темой. Дисплейные формулы в Orca ужимаются в одну строку, иначе построчная перерисовка стирает картинки. Старый `pi-claude-code-ui` с Unicode-конвертером отключён; активен совместимый `better-claude-code-ui`.
 
@@ -61,7 +61,7 @@ JSON-пути адаптируются к `$HOME`; существующие ко
 | `pi-statusline` | 0.0.2 | Статус-строка внешней командой (CC-совместимый JSON на stdin) — внизу та же строка, что в Claude Code; патч `fix-pi-statusline-refresh` |
 | `pi-mcp-adapter` | 5.1.0 | MCP-серверы в pi (notion, telegram) |
 | `@tintinweb/pi-subagents` | 0.19.0 проверена; npm без version pin | Субагенты и workflow-оркестрация; патчи `fix-subagents-typebox-peers` и `fix-subagents-live-tools` (live Activity) |
-| `pi-live-throughput` | 0.3.0 + overlay v3 | Нижний футер: guarded `~TPS`, hit %, session in/out; без cumulative/native rescale, fail-closed burst policy |
+| `pi-live-throughput` | 0.3.0 + overlay v4 | Нижний футер: guarded `~TPS`, hit %, session in/out; без cumulative/native rescale, burst guards и last-good hold |
 | `pi-openai-toolkit` | 0.20.8 | Инструменты интеграции OpenAI, добавлен в текущие настройки |
 | `@vanillagreen/pi-session-manager` | 2.0.4 | Менеджер `/sessions`: поиск, Current/All, возобновление, переименование и удаление; патч скрывает субагентов только в этом списке |
 | `@fadouse/pi-math` | 0.2.0 | Настоящие LaTeX-картинки внутри Orca (MathJax → Kitty); патчи для однострочного отображения в Orca и зависимости xmldom |

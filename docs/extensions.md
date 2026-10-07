@@ -132,11 +132,12 @@ node ~/.pi/agent/patches/fix-cc-tools-light-chrome.mjs
 
 Что захардкожено и настройками не меняется: рамка вокруг юзер-сообщения (`roundedUserBorder`), коннекторы `├ └ │` (меняется только цвет), форма строк.
 
-## pi-live-throughput (0.3.0 + overlay v3)
+## pi-live-throughput (0.3.0 + overlay v4)
 
 Компактный нижний футер: `· ~47.4 TPS hit 90.9% in 28.00M out 229k`.
 Скорость — guarded client-delivery estimate; native billing usage не масштабирует
-окно. Short/burst/invalid output даёт `-`; reasoning summaries и done snapshots
+окно. Short/burst/invalid output не обновляет последнее корректное TPS; паузы и
+новый запрос его не стирают. До первого пригодного значения — `-`. Reasoning summaries и done snapshots
 не timed tokens. Все разделители Pi — маленькие `·`. Исследование измерения,
 пороговые политики и остаточные ограничения: [codex-throughput.md](codex-throughput.md).
 

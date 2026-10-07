@@ -15,7 +15,7 @@ spikes и ограничений: [codex-throughput.md](codex-throughput.md).
 - `pi-statusline@0.0.2` запускает внешнюю команду с CC-совместимым JSON на stdin.
 - `assets/statusline.py` → `~/.local/share/claude-codex-statusline/statusline.py`:
   папка, модель, окно контекста, реальный thinking, occupancy, имя сессии.
-- `pi-live-throughput@0.3.0` + overlay v3 добавляет `~TPS hit … in … out …`
+- `pi-live-throughput@0.3.0` + overlay v4 добавляет `~TPS hit … in … out …`
   через `FooterDataProvider.getExtensionStatuses()` без нового запуска Python
   на каждый output delta. Если поле не помещается — переносится, а не исчезает.
 - `better-claude-code-ui` не ставит второй футер: это выключено патчем

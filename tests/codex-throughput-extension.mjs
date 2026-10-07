@@ -34,7 +34,7 @@ try {
  await raw('response.output_item.added',{item:{id:'m',type:'message'}},1000);
  let text='';for(let i=0;i<4;i++){const delta='abcd'.repeat(10);text+=delta;await raw('response.output_text.delta',{item_id:'m',content_index:0,delta},2000+i*500);}
  assert.equal(line,'~20.0 TPS hit - in 0 out 0');
- clock=99000;await command.handler('status',ctx);assert.match(line,/^- TPS/,'in-flight observation expires during idle');
+ clock=99000;await command.handler('status',ctx);assert.match(line,/^~20.0 TPS/,'in-flight idle keeps last safe observation');
  await raw('response.output_text.done',{item_id:'m',content_index:0,text},100000);
  await raw('response.output_item.done',{item:{id:'m',type:'message',content:[{type:'output_text',text}]}},101000);
  await raw('response.completed',{response:{id:'r',status:'completed',usage:{input_tokens:1000,input_tokens_details:{cached_tokens:900},output_tokens:100000,output_tokens_details:{reasoning_tokens:0}}}},102000);
@@ -42,7 +42,7 @@ try {
  await emit('message_end',{message:final});assert.equal(line,'~20.0 TPS hit 90.0% in 1.0k out 100k','no native usage rescaling');
  const finalLine=line;await emit('message_end',{message:final});assert.equal(line,finalLine,'duplicate end no usage double count');
  clock=200000;await command.handler('widget',ctx);assert.equal(line,finalLine,'completed rate is last response, not live zero');
- await command.handler('status',ctx);await emit('before_provider_request');assert.match(line,/^- TPS/,'new request clears previous response rate');
+ await command.handler('status',ctx);await emit('before_provider_request');assert.match(line,/^~20.0 TPS/,'new request warmup keeps previous validated rate');
  seq=0;await raw('response.created',{response:{id:'next'}},210000);await emit('message_start',{message:base});
  await command.handler('reset',ctx);assert.match(line,/- TPS hit 90.0% in 1.0k out 100k/,'reset keeps billing counters');
  await command.handler('off',ctx);assert.equal(statuses.has('throughput'),false);
@@ -101,6 +101,19 @@ try {
  assert.match(line,/^~20.0 TPS/);
  clock=2501;await emit('message_update',{message:{...generic,usage:{output:100000}},assistantMessageEvent:{type:'done'}});assert.match(line,/^~20.0 TPS/);
  await emit('message_end',{message:{...generic,stopReason:'aborted',usage:{input:100,cacheRead:0,cacheWrite:0,output:100000}}});assert.match(line,/^- TPS hit 0.0% in 100 out 100k/);
+ // Generic last-good fallback survives new request, tiny bursts and a failed
+ // provisional 50 TPS estimate, but never leaks to another provider/model.
+ await emit('before_provider_request');await emit('message_start',{message:generic});
+ for(let i=0;i<4;i++){clock=10000+i*500;await emit('message_update',{message:generic,assistantMessageEvent:{type:'text_delta',delta:'x'.repeat(40)}});}
+ await emit('message_end',{message:{...generic,responseId:'generic-good',stopReason:'stop',usage:{input:100,cacheRead:0,cacheWrite:0,output:100}}});
+ clock=15000;await emit('before_provider_request');await emit('message_start',{message:generic});assert.match(line,/^~20.0 TPS/);
+ for(let i=0;i<4;i++){clock=15001+i*0.01;await emit('message_update',{message:generic,assistantMessageEvent:{type:'text_delta',delta:'x'.repeat(40)}});assert.match(line,/^~20.0 TPS/);}
+ await emit('message_end',{message:{...generic,responseId:'generic-short',stopReason:'stop'}});assert.match(line,/^~20.0 TPS/);
+ await emit('before_provider_request');await emit('message_start',{message:generic});
+ for(let i=0;i<4;i++){clock=20000+i*500;await emit('message_update',{message:generic,assistantMessageEvent:{type:'text_delta',delta:'x'.repeat(100)}});}
+ assert.match(line,/^~50.0 TPS/);
+ await emit('message_end',{message:{...generic,responseId:'generic-failed',stopReason:'error'}});assert.match(line,/^~20.0 TPS/);
+ await emit('before_provider_request');assert.match(line,/^~20.0 TPS/);
  ctx.model={id:'test',provider:'other',api:'other'};await emit('model_select');assert.match(line,/^- TPS/);
  await emit('session_shutdown');
  // Recorded auxiliary usage and idle journal changes update counters, not TPS.
@@ -127,7 +140,7 @@ try {
  const patchUI=()=>spawnSync(process.execPath,[join(repo,'patches/fix-pi-statusline-throughput.mjs'),`--target=${uiTarget}`],{encoding:'utf8'});
  result=patchUI();assert.equal(result.status,0,result.stderr);const uiPatched=readFileSync(uiTarget);result=patchUI();assert.equal(result.status,0,result.stderr);assert.deepEqual(readFileSync(uiTarget),uiPatched);
  writeFileSync(uiTarget,Buffer.concat([uiPatched,Buffer.from('\n// unknown edit')]));const uiEdited=readFileSync(uiTarget);result=patchUI();assert.notEqual(result.status,0);assert.deepEqual(readFileSync(uiTarget),uiEdited);
- console.log('PASS: actual Pi loader + native SSE parser, safe Codex/generic TPS, in/out counters, no native rescale, stale/next/reset/off/model lifecycles, middle dots, widths 1–220, patch guards; zero inference');
+ console.log('PASS: actual Pi loader + native SSE parser, safe Codex/generic TPS, in/out counters, no native rescale, held idle/next/short/failed TPS, reset/off/model lifecycles, middle dots, widths 1–220, patch guards; zero inference');
 } finally {
  if(descriptor)Object.defineProperty(performance,'now',descriptor);else delete performance.now;
  globalThis.fetch=savedFetch;rmSync(temp,{recursive:true,force:true});

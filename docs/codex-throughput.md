@@ -16,8 +16,11 @@ Claude Code сохраняет прежние большие разделите�
 - **`~… TPS`** — приблизительная скорость доставки текста и аргументов тулов
   клиенту за последнее пригодное окно ответа, в условных токенах (UTF-16/4).
   Это **не** точный native decode TPS модели. `~` сохраняется и после завершения.
-- **`- TPS`** — данных недостаточно, поток не проверен, сбой или наблюдение
-  противоречит политике отображения. Старое хорошее число не подставляется.
+- **`- TPS`** — пока нет пригодного измерения для этой модели в текущем runtime
+  (либо выполнен reset/смена модели/сессии/reload). В v4 последнее корректное TPS
+  сохраняется во время пауз, прогрева нового ответа и отвергнутых измерений.
+  Это последнее наблюдение, не обещание текущей скорости. Неуспешный ответ не
+  заменяет подтверждённое значение своим provisional TPS.
 - **`hit`** — cached input / complete input последнего ответа; `0.0%` означает
   подтверждённый промах, `-` — неизвестное. Это не cache hit вывода.
 - **`in`** — сумма записанных `input + cacheRead + cacheWrite` всех запросов
@@ -42,14 +45,14 @@ Claude Code сохраняет прежние большие разделите�
 w.add(1000, 40);
 w.add(1000.0448592, 40);
 // v2: 222919.71323598662 TPS
-// v3: undefined -> "- TPS"
+// v3/v4: undefined -> no new measurement (held good TPS, or "-" if none)
 ```
 
 Дополнительное усиление происходило после `response.completed`: итоговый
 `output_tokens - reasoning_tokens` пересчитывал короткое видимое окно. Native
 usage не является точным счётчиком видимого текста: OpenAI отдельно предупреждает
 о невидимых framing/message/tool/metadata tokens. Даже корректное вычитание
-reasoning не делает такой коэффициент безопасным. В v3 итоговый billing usage
+reasoning не делает такой коэффициент безопасным. В v4 итоговый billing usage
 никогда не масштабирует скорость и не добавляет timed sample.
 
 ## Новая измерительная модель
@@ -66,11 +69,16 @@ reasoning не делает такой коэффициент безопасны
    небазовый bucket даёт >80% объёма или оценка >1000 TPS, результат **отвергается**,
    а не обрезается до предела. Эти числа — наши консервативные UI-пороги,
    **не физические пределы Codex и не доказательство точности**.
-5. Если текущий поток молчит >3 s, показывается `-`. Таймер 500 ms только проверяет
-   устаревание/журнал, не создаёт токены и не делит вывод на время рендера.
-6. Проверенный завершённый ответ сохраняет последний пригодный TPS до нового
-   запроса, reset, смены модели или сессии. Новый запрос сразу очищает старый TPS.
-   Пауза, после которой вывод возобновляется, входит в окно, пока не состарится.
+5. При отсутствии пригодной новой оценки показывается последняя безопасная
+   оценка окна. Таймер 500 ms обновляет журнал/UI, не создаёт токены и не делит
+   вывод на время рендера. Raw window может устареть, но display fallback остаётся.
+6. Новый запрос очищает временные samples, **не последнее подтверждённое TPS**.
+   Live-оценка обновляется только пригодным окном; после успешной проверки ответа
+   она становится подтверждённым fallback. Ошибочный/непроверенный ответ откатывает
+   provisional значение к предыдущему подтверждённому. Burst в конце проверенного
+   ответа не стирает пригодную оценку из его более раннего окна.
+   Reset, смена модели/провайдера/сессии и reload очищают fallback. Пауза, после
+   которой вывод возобновляется, входит в новое окно, пока не состарится.
 
 Число `~` — осознанный proxy. Четыре UTF-16 единицы не равны четырём символам
 Unicode или точной токенизации: CJK, кириллица, emoji, код, JSON, escape sequences
@@ -90,8 +98,9 @@ Unicode или точной токенизации: CJK, кириллица, emo
 - Настоящая speculative decoding тоже может давать многотокенные bursts.
   Отвержение burst — недостаток наблюдаемости, не диагноз «модель врёт».
 - Медиана, EMA, winsorization, clipping или накопленная средняя могут спрятать
-  ошибку измерения. Поэтому нет smoothing, cumulative или held fallback после
-  ошибки. Неизвестное отображается как неизвестное.
+  ошибку измерения. Поэтому нет smoothing/cumulative, а невалидный новый sample
+  не обновляет TPS. Сохранённое число — последнее безопасное наблюдение, не
+  восстановленная скорость ошибочного ответа. Без такого наблюдения — `-`.
 
 Даже поток, равномерно выгруженный из буфера в течение нескольких секунд, может
 пройти эти проверки. Клиент **не способен доказать server decode TPS** без
@@ -103,20 +112,20 @@ Unicode или точной токенизации: CJK, кириллица, emo
 
 | Класс | Защита / результат | Проверка / предел |
 |---|---|---|
-| One-shot, одинаковые/sub-ms timestamps, <1 s, мало buckets/chars | `-`, нет деления на почти ноль | literal 222919.7 repro + boundary/fuzz |
-| Доминирующий большой chunk, uniform rate >policy | `-`, не clamp и не старое число | burst и fast-distributed fixtures |
+| One-shot, одинаковые/sub-ms timestamps, <1 s, мало buckets/chars | нет нового измерения; hold, либо `-` до первой оценки | literal 222919.7 repro + boundary/fuzz |
+| Доминирующий большой chunk, uniform rate >policy | нет новой оценки; hold предыдущей пригодной, без clamp | burst, fast-distributed и held fixtures |
 | Огромный native usage или поздний billing jump | влияет на `out`, не TPS | native=1M; реальный SDK parser |
 | Reasoning summaries/hidden output | summaries не timed output; native output входит в `out` | reasoning=300, output=320 |
 | Missing reasoning metadata | не масштабируем; guarded proxy возможен | native metadata absent fixture |
 | Cache reads/writes | только input; не добавляются к output | hit bounds + usage totals |
 | Первый chunk, пустой delta, repeated done snapshot | baseline/ignore; native hash подтверждает stream | fixture + surrogate split |
 | Long terminal tail, tool execution, TTFT | не timed output | delayed completed fixture |
-| Пауза между deltas / idle | пауза включается при возобновлении; live TTL | pause, stale/final hold |
+| Пауза между deltas / idle | пауза включается при возобновлении; последнее TPS сохраняется | pause, idle hold, next-request warmup |
 | Clock rollback, NaN, Infinity, negative/fractional/overflow | fail-closed | deterministic inputs |
 | Duplicate/out-of-order/missing sequence | consecutive seq required, когда поле есть | duplicate и seq-gap; отсутствие seq допускается |
-| Response/item/content ID mismatch, lost text, malformed fields | TPS скрыт; bounded items/parts; raw/SDK hashes | native fixtures + parser |
+| Response/item/content ID mismatch, lost text, malformed fields | текущая оценка отвергнута; fallback предыдущего проверенного ответа | native fixtures + parser + rollback |
 | Retry / WS-created-before-message-start | новая response ID обнуляет окно; prepared measurement сохраняется | request lifecycle fixtures |
-| Error, abort, length limit, incomplete/failed terminal | TPS скрыт, известный расход остаётся | each stop reason |
+| Error, abort, length limit, incomplete/failed terminal | не заменяет предыдущий проверенный TPS; известный расход остаётся | each stop reason + failed provisional rollback |
 | Hosted search/image/audio/refusal/unhandled output | неизвестный output type исключает TPS | conservative unsupported-output fixture |
 | Provider/model/session change, reload, reset | rate очищен, usage восстановлен; reset не стирает usage | real extension handlers |
 | Generic provider без native hook | guarded delta-only proxy; thinking/usage snapshot игнорируются | offline generic fixture; Codex-only конфиг его не выбирает |
@@ -178,7 +187,7 @@ usage counters, футер и hash guards. Никаких новых inference-�
 другой, небезопасный числитель и native rescale.
 
 Payload — `patches/pi-live-throughput/*.ts`. Патчи принимают только известные
-upstream/v2/v3 хэши и предварительно проверяют все файлы; неизвестные правки не
+upstream/v2/v3/v4 хэши и предварительно проверяют все файлы; неизвестные правки не
 перезаписываются. После установки в уже открытой Pi нужен `/reload` (для удаления
 старых провайдеров и секретов из окружения надёжнее полностью перезапустить Pi).
 

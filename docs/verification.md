@@ -15,7 +15,7 @@ timeout 30 script -q /dev/null pi --tui-mode regular --session \
 
 Так получены цифры из [`compact-output.md`](compact-output.md) и проверка скрытия thinking (5 блоков → 5 строк `Thought for`, 0 утечек).
 
-## 2. Офлайн-прогон throughput v3 (7 октября 2026)
+## 2. Офлайн-прогон throughput v4 (7 октября 2026)
 
 ```bash
 node tests/codex-throughput.mjs
@@ -27,11 +27,13 @@ replays. Integration-тест использует настоящий loader Pi 
 Codex, mock Response и dummy JWT; сеть отключена. На fixture с четырьмя deltas
 по 40 UTF-16 units за 1.5 s выводит `~20.0 TPS` (первый chunk исключён),
 даже если native output = 100000. Проверенный результат:
-`~20.0 TPS hit 90.0% in 1.0k out 100k`. Переход на новый запрос очищает TPS,
-reset не удаляет usage, ошибочный/короткий/burst поток даёт `-`.
+`~20.0 TPS hit 90.0% in 1.0k out 100k`. Пауза и переход на новый запрос сохраняют
+последнее корректное TPS; новое значение заменяет его только после пригодного
+измерения. Ошибочный provisional ответ не портит предыдущий подтверждённый TPS.
+Reset очищает TPS, но не usage.
 
 Исследование измерительных ограничений и источники: [codex-throughput.md](codex-throughput.md).
-Старые скорости widget/native-rescaled версии не используются как эталон v3.
+Старые скорости widget/native-rescaled версии не используются как эталон v4.
 
 ## 3. Проверка загрузки
 

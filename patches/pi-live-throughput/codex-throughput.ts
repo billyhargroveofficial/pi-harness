@@ -1,4 +1,4 @@
-// pi-harness: conservative output delivery metrics, v3.
+// pi-harness: conservative output delivery metrics with held last good TPS, v4.
 // MIT; original pi-live-throughput copyright/license remains in the package.
 import { createHash } from "node:crypto";
 
@@ -74,6 +74,7 @@ export class OutputWindow {
 	reason = "warming-up";
 	invalid = false;
 	currentCharsPerSecond: number | undefined;
+	lastEstimated: number | undefined;
 	add(t: number, chars: number): void {
 		if (chars === 0) return;
 		if (this.invalid) return;
@@ -95,7 +96,7 @@ export class OutputWindow {
 		if (largest / received > POLICY.maxBucketShare) { this.reason = "burst-dominated"; return; }
 		const value = received / (ms / 1000) / 4;
 		if (!Number.isFinite(value) || value > POLICY.maxTps || value < 0.05) { this.reason = "outside-display-policy"; return; }
-		this.reason = "ok"; this.currentCharsPerSecond = value * 4;
+		this.reason = "ok"; this.currentCharsPerSecond = value * 4; this.lastEstimated = value;
 	}
 	get spanMs(): number { return this.first === undefined || this.last === undefined ? 0 : this.last - this.first; }
 	get estimatedCurrent(): number | undefined { return this.currentCharsPerSecond === undefined ? undefined : this.currentCharsPerSecond / 4; }
@@ -213,10 +214,11 @@ export class CodexMeasurement {
 		return this.completed && !this.invalid && !this.window.invalid && !this.hasOtherOutput && !!this.responseId
 			&& (message.responseId === undefined || message.responseId === this.responseId)
 			&& this.items.size > 0 && [...this.items.values()].every(i => i.done)
-			&& this.window.estimatedCurrent !== undefined && textMatches && !["error", "aborted", "length"].includes(message.stopReason);
+			&& this.window.lastEstimated !== undefined && textMatches && !["error", "aborted", "length"].includes(message.stopReason);
 	}
 	current(now: number, finalValid = false): number | undefined {
-		return this.invalid || this.hasOtherOutput || (this.terminal && !this.completed) ? undefined : this.window.current(now, finalValid);
+		return this.invalid || this.window.invalid || this.hasOtherOutput || (this.terminal && !this.completed)
+			? undefined : (this.window.current(now, finalValid) ?? this.window.lastEstimated);
 	}
 }
 
@@ -229,8 +231,15 @@ export class CodexThroughput {
 	finalValid = false;
 	lastRender = 0;
 	prepared = false;
+	// Last fully validated response, separate from the current window. A failed
+	// or unsupported response cannot poison this fallback with provisional TPS.
+	heldRate: number | undefined;
 	isCodex(message: Json): boolean { return message.api === "openai-codex-responses" || message.provider === "openai-codex"; }
 	start(message: Json): void {
+		const id = message.responseModel ?? message.model;
+		const key = `${message.provider}/${id}`;
+		if (this.selectedModel && this.selectedModel !== key) this.select({ id, provider: message.provider, api: message.api });
+		this.selectedModel = key;
 		if (this.prepared && this.active && this.isCodex(message)) {
 			if (this.measurement && (message.responseModel ?? message.model) !== this.measurement.model) this.measurement.invalid = true;
 			this.prepared = false; return;
@@ -240,13 +249,14 @@ export class CodexThroughput {
 		this.final = false; this.finalValid = false; this.lastRender = 0;
 	}
 	prepare(model: Json, t: number): void {
+		this.select(model);
 		this.prepared = false; this.start({ api: model.api, provider: model.provider, model: model.id });
 		this.request(t); this.prepared = this.active; this.selectedModel = `${model.provider}/${model.id}`;
 	}
 	select(model: Json | undefined): void {
 		if (!model) return;
 		const key = `${model.provider}/${model.id}`;
-		if (this.selectedModel !== key) { this.measurement = undefined; this.final = false; this.finalValid = false; this.prepared = false; }
+		if (this.selectedModel !== key) { this.measurement = undefined; this.final = false; this.finalValid = false; this.prepared = false; this.heldRate = undefined; }
 		this.selectedModel = key; this.active = this.isCodex(model);
 	}
 	request(t: number): void { if (this.active && this.measurement) this.measurement.requestTime = t; }
@@ -260,20 +270,23 @@ export class CodexThroughput {
 	end(message: Json): void {
 		if (!this.active || !this.measurement || this.final) return;
 		this.final = true; this.finalValid = this.measurement.finish(message);
+		if (this.finalValid) this.heldRate = this.measurement.window.lastEstimated;
 	}
 	reset(): void {
+		this.heldRate = undefined;
 		if (this.final) this.measurement = undefined;
 		else if (this.measurement) this.measurement.window = new OutputWindow();
 		this.final = false; this.finalValid = false;
 	}
 	sessionReset(entries: Json[] = []): void {
 		this.active = false; this.measurement = undefined; this.prepared = false;
-		this.final = false; this.finalValid = false; this.selectedModel = ""; this.input.restore(entries);
+		this.final = false; this.finalValid = false; this.selectedModel = ""; this.heldRate = undefined; this.input.restore(entries);
 	}
 	render(_mode: "widget" | "status", now = performance.now()): string | undefined {
 		if (!this.active) return undefined;
 		const m = this.measurement;
-		const value = this.final && !this.finalValid ? undefined : m?.current(now, this.finalValid);
+		const current = this.final && !this.finalValid ? undefined : m?.current(now, this.finalValid);
+		const value = current ?? this.heldRate;
 		const cacheHit = m?.terminal ? (m.inputTokens && m.cachedTokens !== undefined ? 100 * m.cachedTokens / m.inputTokens : NaN) : this.input.cacheHit;
 		return `${formatRate(value)} TPS ${this.input.fields(cacheHit)}`;
 	}
